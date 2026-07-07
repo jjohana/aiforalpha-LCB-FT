@@ -30,3 +30,5 @@ Le navigateur conserve un registre local durable par email avec une clé stable,
 Le registre local conserve les connexions, le temps actif total, le temps par module, les réponses, les bonnes réponses, les scores, les tentatives terminées et le dernier snapshot de progression.
 
 Le serveur local consigne aussi ces données dans `data/training-records.json` avec écriture atomique, et écrit un journal append-only dans `data/training-events.jsonl`.
+
+Dans les exports JSON, `result.passed` signifie que le QCM est réussi avec au moins 80 %. `result.trainingPassed` signifie que le QCM est réussi et que tous les modules ont été marqués comme lus. Les choix de réponses sont mélangés à chaque nouvelle tentative, avec les bonnes réponses réparties entre A, B, C et D.

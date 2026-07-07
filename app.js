@@ -624,8 +624,8 @@ const moduleCourseNotes = {
   }
 };
 
-const APP_STORAGE_VERSION = 4;
-const APP_BUILD = "2026-07-07-long-save";
+const APP_STORAGE_VERSION = 5;
+const APP_BUILD = "2026-07-07-shuffled-qcm";
 const STORAGE_PREFIX = "afa-lcbft-training";
 const LEGACY_STATE_PREFIXES = [
   "afa-lcbft-training-v3:",
@@ -644,6 +644,7 @@ const stateDefaults = {
   activeModule: "model",
   readModules: [],
   quizOrder: [],
+  choiceOrders: {},
   quizIndex: 0,
   answers: [],
   completedAt: null,
@@ -769,7 +770,7 @@ function bindEvents() {
     } else {
       state.completedAt = new Date().toISOString();
       state.questionStartedAt = null;
-      showToast(getPassStatus().passed ? "QCM validé." : "QCM terminé. Recommencez pour atteindre 80%.");
+      showToast(getCompletionMessage());
     }
     saveState("quiz_next");
     renderAll();
@@ -886,6 +887,7 @@ function createDefaultState(role) {
     role: role || "all",
     readModules: [],
     quizOrder: [],
+    choiceOrders: {},
     answers: [],
     currentAttemptId: createSessionId(),
     attemptStartedAt: now,
@@ -954,6 +956,7 @@ function normalizeState(stored, initialRole) {
   merged.activeModule = modules.some(module => module.id === merged.activeModule) ? merged.activeModule : "model";
   merged.readModules = Array.isArray(merged.readModules) ? merged.readModules.filter(id => modules.some(module => module.id === id)) : [];
   merged.quizOrder = Array.isArray(merged.quizOrder) ? merged.quizOrder : [];
+  merged.choiceOrders = merged.choiceOrders && typeof merged.choiceOrders === "object" ? merged.choiceOrders : {};
   merged.quizIndex = Number.isInteger(merged.quizIndex) && merged.quizIndex >= 0 ? merged.quizIndex : 0;
   merged.answers = Array.isArray(merged.answers) ? merged.answers : [];
   merged.currentAttemptId = merged.currentAttemptId || createSessionId();
@@ -1052,6 +1055,9 @@ function buildLocalSnapshot(reason) {
     modulesRead: state.readModules.length,
     totalModules: modules.length,
     passed: pass.passed,
+    trainingPassed: pass.trainingPassed,
+    qcmPassed: pass.qcmPassed,
+    modulesComplete: pass.modulesComplete,
     completedAt: state.completedAt,
     timeSpentMs: safeNumber(state.timing.totalMs),
     timeSpentLabel: formatDuration(state.timing.totalMs)
@@ -1089,6 +1095,7 @@ function recordCompletedAttemptIfNeeded() {
     modulesRead: state.readModules.length,
     totalModules: modules.length,
     passed: pass.passed,
+    trainingPassed: pass.trainingPassed,
     timeSpentMs: getAttemptTimeMs(),
     answers: state.answers.filter(Boolean)
   };
@@ -1100,6 +1107,7 @@ function recordCompletedAttemptIfNeeded() {
     correct: pass.correct,
     answered: pass.answered,
     passed: pass.passed,
+    trainingPassed: pass.trainingPassed,
     timeSpentMs: attempt.timeSpentMs
   });
 }
@@ -1190,6 +1198,7 @@ function setRole(roleId) {
   saveState("role_leave", { remote: false });
   state.role = roleId;
   state.quizOrder = [];
+  state.choiceOrders = {};
   state.quizIndex = 0;
   state.answers = [];
   state.completedAt = null;
@@ -1206,6 +1215,7 @@ function ensureQuizOrder() {
   const validIds = getQuestionsForRole().map((question, index) => index);
   if (state.quizOrder.length === 0 || state.quizOrder.some(index => !validIds.includes(index))) {
     state.quizOrder = buildQuizOrder();
+    state.choiceOrders = {};
     state.quizIndex = 0;
     state.answers = [];
     state.completedAt = null;
@@ -1213,6 +1223,7 @@ function ensureQuizOrder() {
     state.attemptStartedAt = state.attemptStartedAt || new Date().toISOString();
     state.questionStartedAt = state.questionStartedAt || state.attemptStartedAt;
   }
+  ensureChoiceOrders();
 }
 
 function ensureQuestionTimer() {
@@ -1241,6 +1252,77 @@ function buildQuizOrder() {
     if (!unique.includes(index)) unique.push(index);
   }
   return unique.slice(0, target);
+}
+
+function ensureChoiceOrders() {
+  const questions = getQuestionsForRole();
+  state.choiceOrders = state.choiceOrders && typeof state.choiceOrders === "object" ? state.choiceOrders : {};
+  state.quizOrder.forEach((questionIndex, position) => {
+    const question = questions[questionIndex];
+    if (!question) return;
+    const order = state.choiceOrders[question.id];
+    if (!isValidChoiceOrder(question, order)) {
+      state.choiceOrders[question.id] = buildChoiceOrder(question, position);
+    }
+  });
+}
+
+function isValidChoiceOrder(question, order) {
+  if (!Array.isArray(order) || order.length !== question.choices.length) return false;
+  const expected = new Set(question.choices.map((_, index) => index));
+  return order.every(index => expected.has(index)) && new Set(order).size === expected.size;
+}
+
+function buildChoiceOrder(question, position) {
+  const choiceCount = question.choices.length;
+  const correctDisplayCycle = [2, 0, 3, 1];
+  const seed = hashString(`${state.currentAttemptId || ""}:${question.id}:${position}`);
+  const correctDisplayIndex = correctDisplayCycle[(position + seed) % correctDisplayCycle.length] % choiceCount;
+  const wrongIndexes = question.choices
+    .map((_, index) => index)
+    .filter(index => index !== question.answer);
+  const shuffledWrong = seededShuffle(wrongIndexes, seed);
+  const order = new Array(choiceCount);
+  order[correctDisplayIndex] = question.answer;
+  let wrongCursor = 0;
+  for (let displayIndex = 0; displayIndex < choiceCount; displayIndex += 1) {
+    if (order[displayIndex] === undefined) {
+      order[displayIndex] = shuffledWrong[wrongCursor];
+      wrongCursor += 1;
+    }
+  }
+  return order;
+}
+
+function getChoiceOrder(question) {
+  const order = state.choiceOrders?.[question.id];
+  return isValidChoiceOrder(question, order) ? order : question.choices.map((_, index) => index);
+}
+
+function getDisplayIndex(question, originalIndex) {
+  return getChoiceOrder(question).indexOf(originalIndex);
+}
+
+function getDisplayLetter(question, originalIndex) {
+  const displayIndex = getDisplayIndex(question, originalIndex);
+  return String.fromCharCode(65 + (displayIndex >= 0 ? displayIndex : originalIndex));
+}
+
+function seededShuffle(values, seed) {
+  return values
+    .map((value, index) => ({ value, sort: hashString(`${seed}:${value}:${index}`) }))
+    .sort((a, b) => a.sort - b.sort)
+    .map(item => item.value);
+}
+
+function hashString(value) {
+  let hash = 2166136261;
+  const text = String(value);
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }
 
 function getQuestionsForRole() {
@@ -1376,16 +1458,18 @@ function renderQuestion() {
 
   els.difficultyTag.textContent = question.difficulty;
   els.questionText.textContent = question.prompt;
-  els.answers.innerHTML = question.choices.map((choice, index) => {
+  const choiceOrder = getChoiceOrder(question);
+  els.answers.innerHTML = choiceOrder.map((originalIndex, displayIndex) => {
+    const choice = question.choices[originalIndex];
     let cls = "";
     if (answerRecord) {
-      if (index === question.answer) cls = " is-correct";
-      if (index === answerRecord.answer && index !== question.answer) cls = " is-wrong";
+      if (originalIndex === question.answer) cls = " is-correct";
+      if (originalIndex === answerRecord.answer && originalIndex !== question.answer) cls = " is-wrong";
     }
-    const lesson = answerRecord ? buildChoiceLesson(question, choice, index) : "";
+    const lesson = answerRecord ? buildChoiceLesson(question, choice, originalIndex) : "";
     return `
-      <button class="answer${cls}" type="button" data-answer="${index}">
-        <span class="answer-letter">${String.fromCharCode(65 + index)}</span>
+      <button class="answer${cls}" type="button" data-answer="${originalIndex}">
+        <span class="answer-letter">${String.fromCharCode(65 + displayIndex)}</span>
         <span class="answer-copy">
           <span>${escapeHtml(choice)}</span>
           ${lesson ? `<span class="answer-lesson">${escapeHtml(lesson)}</span>` : ""}
@@ -1409,8 +1493,8 @@ function renderQuestion() {
 
 function buildCourseCorrection(question, answerRecord) {
   const notes = moduleCourseNotes[question.module] || moduleCourseNotes.model;
-  const selectedLetter = String.fromCharCode(65 + answerRecord.answer);
-  const correctLetter = String.fromCharCode(65 + question.answer);
+  const selectedLetter = getDisplayLetter(question, answerRecord.answer);
+  const correctLetter = getDisplayLetter(question, question.answer);
   const status = answerRecord.correct ? "Réponse correcte" : "Réponse à corriger";
   const statusClass = answerRecord.correct ? "is-ok" : "is-ko";
 
@@ -1535,6 +1619,8 @@ function submitAnswer(answer) {
   const question = getCurrentQuestion();
   const correct = answer === question.answer;
   const answeredAt = new Date();
+  const selectedDisplayIndex = getDisplayIndex(question, answer);
+  const correctDisplayIndex = getDisplayIndex(question, question.answer);
   state.answers[state.quizIndex] = {
     attemptId: state.currentAttemptId,
     questionId: question.id,
@@ -1542,8 +1628,12 @@ function submitAnswer(answer) {
     difficulty: question.difficulty,
     prompt: question.prompt,
     answer,
+    displayAnswer: selectedDisplayIndex,
+    answerLetter: getDisplayLetter(question, answer),
     answerLabel: question.choices[answer],
     correctAnswer: question.answer,
+    correctDisplayAnswer: correctDisplayIndex,
+    correctLetter: getDisplayLetter(question, question.answer),
     correctLabel: question.choices[question.answer],
     correct,
     answeredAt: answeredAt.toISOString(),
@@ -1572,13 +1662,15 @@ function markModuleRead(moduleId) {
 }
 
 function resetQuiz() {
-  state.quizOrder = buildQuizOrder();
-  state.quizIndex = 0;
-  state.answers = [];
-  state.completedAt = null;
   state.currentAttemptId = createSessionId();
   state.attemptStartedAt = new Date().toISOString();
   state.questionStartedAt = state.attemptStartedAt;
+  state.quizOrder = buildQuizOrder();
+  state.choiceOrders = {};
+  ensureChoiceOrders();
+  state.quizIndex = 0;
+  state.answers = [];
+  state.completedAt = null;
   saveState("quiz_reset");
   renderAll();
 }
@@ -1596,9 +1688,9 @@ function renderMetrics() {
   els.metricAnswered.textContent = pass.answered;
   els.metricCorrect.textContent = pass.correct;
   els.metricTime.textContent = formatDuration(state.timing?.totalMs || 0);
-  els.metricStatus.textContent = pass.passed ? "Validé" : "À faire";
+  els.metricStatus.textContent = pass.trainingPassed ? "Validé" : pass.qcmPassed ? "QCM validé" : "À faire";
 
-  if (pass.passed) {
+  if (pass.trainingPassed) {
     const date = new Date(state.completedAt || Date.now()).toLocaleDateString("fr-FR");
     const role = roles.find(item => item.id === state.role)?.label || state.role;
     els.certificateText.textContent = `${currentUser.name} a validé la sensibilisation LCB-FT Ai For Alpha (${role}) le ${date}, avec ${pass.score}% de bonnes réponses, ${pass.correct}/${pass.answered} réponses correctes, ${state.readModules.length}/${modules.length} modules lus et ${formatDuration(state.timing?.totalMs || 0)} de temps actif.`;
@@ -1612,12 +1704,27 @@ function getPassStatus() {
   const answered = state.answers.filter(Boolean);
   const correct = answered.filter(item => item.correct).length;
   const score = answered.length ? Math.round((correct / answered.length) * 100) : 0;
+  const quizComplete = answered.length === state.quizOrder.length && state.quizOrder.length > 0;
+  const qcmPassed = quizComplete && score >= 80;
+  const modulesComplete = state.readModules.length === modules.length;
+  const trainingPassed = modulesComplete && qcmPassed;
   return {
-    passed: state.readModules.length === modules.length && answered.length === state.quizOrder.length && score >= 80,
+    passed: qcmPassed,
+    trainingPassed,
+    qcmPassed,
+    modulesComplete,
+    quizComplete,
     score,
     answered: answered.length,
     correct
   };
+}
+
+function getCompletionMessage() {
+  const pass = getPassStatus();
+  if (pass.trainingPassed) return "Formation validée : QCM réussi et modules lus.";
+  if (pass.qcmPassed) return "QCM réussi. Marquez tous les modules comme lus pour valider la formation.";
+  return `QCM terminé : ${pass.score}%. Recommencez pour atteindre 80%.`;
 }
 
 function scheduleSync(reason) {
@@ -1661,6 +1768,9 @@ function buildProofPayload(reason) {
     },
     result: {
       passed: pass.passed,
+      trainingPassed: pass.trainingPassed,
+      qcmPassed: pass.qcmPassed,
+      modulesComplete: pass.modulesComplete,
       score: pass.score,
       correct: pass.correct,
       answered: pass.answered,
