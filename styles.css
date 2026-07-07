@@ -518,6 +518,50 @@ p {
   background: var(--paper);
 }
 
+.module-deep-dive {
+  margin-top: 16px;
+}
+
+.course-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.course-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--white);
+}
+
+.course-card-wide {
+  grid-column: 1 / -1;
+}
+
+.course-card strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--aifa-blue);
+}
+
+.course-card p {
+  margin: 0;
+  color: var(--aifa-gray);
+}
+
+.course-card ul {
+  display: grid;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--aifa-gray);
+}
+
+.course-card li {
+  padding-left: 2px;
+}
+
 .flow,
 .risk-grid {
   display: grid;
@@ -913,6 +957,7 @@ th {
   .training-grid,
   .role-band,
   .metrics,
+  .course-grid,
   .flow,
   .risk-grid {
     grid-template-columns: 1fr;

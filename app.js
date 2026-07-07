@@ -133,6 +133,142 @@ const modules = [
   }
 ];
 
+const moduleDeepDives = {
+  model: {
+    objective: "Comprendre pourquoi la LCB-FT d'Ai For Alpha est proportionnée à un modèle B2B institutionnel sans custody, sans exécution d'ordres et sans maniement de fonds clients.",
+    reflexes: [
+      "Toujours distinguer les fonds investis par le client, hors périmètre opérationnel, et les honoraires facturés par Ai For Alpha, qui doivent être cohérents.",
+      "Ne jamais ouvrir d'accès, transmettre de contenu réservé ou diffuser de signaux si le dossier minimum n'est pas validé.",
+      "Ramener chaque doute à trois questions simples : qui est la contrepartie, quel service reçoit-elle, quel flux financier Ai For Alpha encaisse-t-elle ?"
+    ],
+    pitfalls: [
+      "Penser qu'un client institutionnel ou régulé dispense de toute diligence.",
+      "Appliquer un parcours de banque dépositaire à Ai For Alpha et demander des informations hors finalité.",
+      "Confondre absence de custody et absence d'obligation LCB-FT."
+    ],
+    evidence: [
+      "Contrat ou proposition décrivant le service fourni.",
+      "Trace du dossier d'identification et du screening.",
+      "Conclusion de risque et décision d'ouverture, de suspension ou de refus."
+    ],
+    scenario: "Un prospect demande un accès API avant signature pour tester les signaux. La bonne conduite est de refuser l'accès opérationnel, qualifier la relation, finaliser les diligences puis seulement ouvrir l'accès si la décision est favorable."
+  },
+  onboarding: {
+    objective: "Savoir constituer le dossier minimum avant toute entrée en relation ou tout accès à un contenu réservé.",
+    reflexes: [
+      "Identifier l'entité cliente avant d'identifier seulement le signataire : dénomination, forme, pays, adresse et identifiant.",
+      "Vérifier que le signataire ou interlocuteur habilité est cohérent avec l'entité, son email professionnel et son rôle.",
+      "Qualifier le canal de diffusion, les pays, l'apporteur éventuel, le payeur attendu et l'élément cross-border avant de conclure."
+    ],
+    pitfalls: [
+      "Considérer une facture payée comme une preuve suffisante d'identification.",
+      "Reporter le KYC à la revue annuelle après avoir ouvert l'accès.",
+      "Laisser l'apporteur porter seul la connaissance client."
+    ],
+    evidence: [
+      "Fiche client ou dossier KYC avec entité, signataires, rôle et pouvoirs utiles.",
+      "Trace de screening préalable et classification de risque.",
+      "Décision d'ouverture ou de demande de pièces complémentaires."
+    ],
+    scenario: "Un prospect connu commercialement utilise une adresse personnelle pour signer. La relation ne doit pas être bloquée automatiquement, mais la fonction, l'habilitation et la cohérence avec le client doivent être documentées avant accès."
+  },
+  ubo: {
+    objective: "Appliquer une approche proportionnée des bénéficiaires effectifs, renforcée lorsque la structure crée un doute.",
+    reflexes: [
+      "Pour les grands institutionnels transparents, documenter le statut régulé, coté, public ou supervisé et conclure raisonnablement.",
+      "Pour les holdings, véhicules privés ou structures multi-juridictionnelles, demander organigramme, bénéficiaires effectifs et justification de structure.",
+      "Escalader si le client refuse de documenter une structure opaque ou si la chaîne de contrôle reste incohérente."
+    ],
+    pitfalls: [
+      "Demander tous les bénéficiaires d'un fonds de pension ou chaque adhérent d'un organisme public.",
+      "Ne rien écrire sous prétexte que l'entité est connue ou réputée.",
+      "Classer automatiquement en faible une structure privée simplement parce que le ticket commercial est important."
+    ],
+    evidence: [
+      "Extrait de registre, organigramme, preuve de supervision ou page institutionnelle fiable.",
+      "Note de proportionnalité lorsque l'identification détaillée de personnes physiques n'est pas pertinente.",
+      "Note d'escalade ou décision de refus si les pièces ne permettent pas de lever le doute."
+    ],
+    scenario: "Une filiale d'un groupe coté européen n'appelle pas les mêmes diligences qu'une holding privée dans plusieurs juridictions. Le niveau de preuve doit suivre l'opacité réelle, pas seulement le nom commercial."
+  },
+  risk: {
+    objective: "Transformer la classification faible, modéré ou élevé en mesures concrètes, et non en simple score abstrait.",
+    reflexes: [
+      "Croiser les six dimensions : client, géographie, service, canal, transparence de structure et cohérence des paiements.",
+      "Documenter la raison du niveau retenu en une phrase compréhensible par un contrôleur.",
+      "Associer chaque niveau à une action : pièces standard, pièces complémentaires, validation direction, revue rapprochée, suspension ou refus."
+    ],
+    pitfalls: [
+      "Classer faible par automatisme parce que le client est institutionnel.",
+      "Classer élevé sans analyse alors que les signaux sont maîtrisables et documentés.",
+      "Oublier qu'un paiement tiers ou une pression commerciale peut changer le niveau de risque."
+    ],
+    evidence: [
+      "Grille de classification ou note interne datée.",
+      "Facteurs retenus et facteurs écartés, avec justification courte.",
+      "Validation direction/conformité pour les cas élevés ou sensibles."
+    ],
+    scenario: "Un client US institutionnel transparent peut être modéré si le cross-border et la relation à distance sont maîtrisés. Il devient plus sensible si s'ajoutent structure opaque, tiers payeur ou pression pour contourner le processus."
+  },
+  screening: {
+    objective: "Réaliser un screening défendable : bon périmètre de noms, preuve datée, conclusion et escalade en cas de doute.",
+    reflexes: [
+      "Screening avant entrée en relation, puis lors d'une revue ou d'un événement significatif.",
+      "Contrôler l'entité, noms commerciaux, signataires, représentants habilités, dirigeants pertinents et bénéficiaires effectifs requis.",
+      "Conserver date, source, noms contrôlés, résultat et conclusion, même si le résultat est négatif."
+    ],
+    pitfalls: [
+      "Garder seulement une capture d'écran sans conclusion.",
+      "Supprimer un résultat gênant ou changer l'orthographe pour éviter un match.",
+      "Demander directement au prospect s'il est sanctionné au lieu d'escalader."
+    ],
+    evidence: [
+      "Export ou capture de l'outil avec date et source.",
+      "Liste des noms réellement contrôlés.",
+      "Note de faux positif ou note d'escalade en cas de doute non levé."
+    ],
+    scenario: "Un homonyme apparaît sur une liste. Si la date de naissance, le pays et la fonction ne correspondent pas, il faut documenter le faux positif. Si le doute persiste, l'onboarding est suspendu et escaladé."
+  },
+  payments: {
+    objective: "Contrôler les flux d'honoraires encaissés par Ai For Alpha sans confondre ce contrôle avec les fonds investis par les clients.",
+    reflexes: [
+      "Vérifier que le payeur correspond au client contractant ou à une entité du même groupe justifiée.",
+      "Comparer facture, contrat, banque, pays, devise et montant avant acceptation d'un flux atypique.",
+      "Escalader avant encaissement si un tiers payeur, une juridiction sensible ou une incohérence bancaire apparaît."
+    ],
+    pitfalls: [
+      "Accepter un tiers payeur au motif que la facture est réglée.",
+      "Modifier le contrat après réception du paiement pour faire disparaître l'anomalie.",
+      "Laisser un apporteur collecter un acompte ou recevoir des fonds du prospect."
+    ],
+    evidence: [
+      "Facture, contrat et justificatif du lien avec le payeur lorsqu'il diffère du client.",
+      "Trace de l'analyse de cohérence du flux.",
+      "Décision d'acceptation, de demande de justification, de suspension ou de refus."
+    ],
+    scenario: "Si la facture est au nom d'un asset manager mais le paiement arrive d'une société tierce située dans une juridiction sensible, l'encaissement doit être suspendu jusqu'à justification et décision documentée."
+  },
+  escalation: {
+    objective: "Savoir quand remonter, comment documenter, qui décide et quelles preuves conserver pour démontrer le dispositif.",
+    reflexes: [
+      "Remonter immédiatement toute anomalie avant poursuite, accès supplémentaire ou encaissement sensible.",
+      "Garder la confidentialité des analyses de soupçon et ne jamais informer le client d'une déclaration éventuelle.",
+      "Tracer la décision : poursuite, mesures renforcées, attente de pièces, suspension, refus ou fin de relation."
+    ],
+    pitfalls: [
+      "Attendre la fin du trimestre ou la revue annuelle pour traiter une alerte.",
+      "Confondre alerte et déclaration automatique : une déclaration suppose une analyse documentée.",
+      "Conserver seulement un email informel sans faits, pièces, décision ni propriétaire."
+    ],
+    evidence: [
+      "Note d'escalade ou registre des cas sensibles.",
+      "Décision de direction/conformité et mesures prises.",
+      "Preuves de désignation TRACFIN, formations, présences, attestations, QCM et revues de procédure."
+    ],
+    scenario: "Une alerte adverse media apparaît pendant l'onboarding. Le bon réflexe est de documenter les faits, suspendre si nécessaire, escalader et garder la confidentialité jusqu'à décision."
+  }
+};
+
 const questionBank = [
   {
     id: "q-model-1",
@@ -688,6 +824,7 @@ const els = {
   moduleLead: document.getElementById("moduleLead"),
   modulePoints: document.getElementById("modulePoints"),
   moduleVisual: document.getElementById("moduleVisual"),
+  moduleDeepDive: document.getElementById("moduleDeepDive"),
   markReadBtn: document.getElementById("markReadBtn"),
   nextModuleBtn: document.getElementById("nextModuleBtn"),
   questionCount: document.getElementById("questionCount"),
@@ -1387,6 +1524,7 @@ function renderModule() {
   els.modulePoints.innerHTML = module.points.map(point => `<li><span>${escapeHtml(point)}</span></li>`).join("");
   els.markReadBtn.textContent = state.readModules.includes(module.id) ? "Module lu" : "Marquer le module lu";
   renderVisual(module.visual);
+  renderModuleDeepDive(module.id);
 }
 
 function renderVisual(type) {
@@ -1440,6 +1578,41 @@ function renderVisual(type) {
     `
   };
   els.moduleVisual.innerHTML = visuals[type] || visuals.flow;
+}
+
+function renderModuleDeepDive(moduleId) {
+  const lesson = moduleDeepDives[moduleId];
+  if (!lesson) {
+    els.moduleDeepDive.innerHTML = "";
+    return;
+  }
+
+  els.moduleDeepDive.innerHTML = `
+    <div class="course-grid">
+      <section class="course-card course-card-wide">
+        <strong>Objectif opérationnel</strong>
+        <p>${escapeHtml(lesson.objective)}</p>
+      </section>
+      ${renderCourseCard("Réflexes clés", lesson.reflexes)}
+      ${renderCourseCard("Pièges fréquents", lesson.pitfalls)}
+      ${renderCourseCard("Preuves à conserver", lesson.evidence)}
+      <section class="course-card course-card-wide">
+        <strong>Mini-cas pratique</strong>
+        <p>${escapeHtml(lesson.scenario)}</p>
+      </section>
+    </div>
+  `;
+}
+
+function renderCourseCard(title, items) {
+  return `
+    <section class="course-card">
+      <strong>${escapeHtml(title)}</strong>
+      <ul>
+        ${items.map(item => `<li>${escapeHtml(item)}</li>`).join("")}
+      </ul>
+    </section>
+  `;
 }
 
 function renderQuestion() {
