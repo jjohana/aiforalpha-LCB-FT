@@ -761,7 +761,7 @@ const moduleCourseNotes = {
 };
 
 const APP_STORAGE_VERSION = 5;
-const APP_BUILD = "2026-07-07-shuffled-qcm";
+const APP_BUILD = "2026-07-07-restore-progress";
 const STORAGE_PREFIX = "afa-lcbft-training";
 const LEGACY_STATE_PREFIXES = [
   "afa-lcbft-training-v3:",
@@ -958,10 +958,12 @@ async function login(rawEmail) {
   els.loginMessage.textContent = "Connexion...";
   let sessionId = createSessionId();
   let serverMode = false;
+  let serverUser = null;
 
   try {
     const result = await apiPost("/api/login", { email });
     sessionId = result.sessionId || sessionId;
+    serverUser = result.user || null;
     serverMode = true;
   } catch {
     serverMode = false;
@@ -970,6 +972,7 @@ async function login(rawEmail) {
   currentUser = { ...user, sessionId, serverMode };
   sessionStorage.setItem("afa-lcbft-session", JSON.stringify(currentUser));
   loadState();
+  hydrateStateFromServer(serverUser);
   if (!state.role || state.role === "all") state.role = user.defaultRole || "all";
   ensureQuizOrder();
   ensureQuestionTimer();
@@ -1144,6 +1147,269 @@ function registerLoginLocally() {
   longRecord.lastLoginAt = now;
   longRecord.loginCount = safeNumber(longRecord.loginCount) + 1;
   appendLocalEvent("login", { sessionId: currentUser.sessionId, serverMode: Boolean(currentUser.serverMode) });
+}
+
+function hydrateStateFromServer(serverUser) {
+  mergeServerRecordMetadata(serverUser);
+  const progress = getServerProgressSnapshot(serverUser);
+  if (!progress || !shouldUseServerProgress(progress)) return;
+
+  applyServerProgress(progress, serverUser);
+  appendLocalEvent("server_restore", {
+    savedAt: progress.savedAt || null,
+    score: progress.result?.score ?? null,
+    answered: progress.result?.answered ?? null,
+    modulesRead: progress.result?.modulesRead ?? null
+  });
+}
+
+function mergeServerRecordMetadata(serverUser) {
+  if (!serverUser || !longRecord) return;
+  longRecord.loginCount = Math.max(safeNumber(longRecord.loginCount), safeNumber(serverUser.loginCount));
+  longRecord.lastLoginAt = newestTimestamp(longRecord.lastLoginAt, serverUser.lastLoginAt) || longRecord.lastLoginAt;
+  longRecord.totalTimeMs = Math.max(safeNumber(longRecord.totalTimeMs), safeNumber(serverUser.totalTimeMs));
+  longRecord.moduleTimeMs = mergeModuleTimes(longRecord.moduleTimeMs, serverUser.moduleTimeMs);
+  longRecord.attempts = mergeAttempts(longRecord.attempts, serverUser.attempts);
+  state.stats.bestScore = Math.max(safeNumber(state.stats.bestScore), getBestAttemptScore(serverUser.attempts));
+  state.stats.completedCount = Math.max(safeNumber(state.stats.completedCount), countPassedServerAttempts(serverUser));
+}
+
+function getServerProgressSnapshot(serverUser) {
+  const latest = serverUser?.latestProgress;
+  if (latest && (latest.result || latest.answers?.length || latest.readModules?.length)) return latest;
+
+  const attempts = Array.isArray(serverUser?.attempts) ? serverUser.attempts : [];
+  const latestAttempt = attempts
+    .filter(attempt => attempt?.completedAt)
+    .sort((a, b) => getAttemptSavedMs(b) - getAttemptSavedMs(a))[0];
+
+  if (!latestAttempt) return null;
+  return {
+    savedAt: latestAttempt.savedAt || latestAttempt.completedAt,
+    reason: "attempt_restore",
+    role: latestAttempt.role || null,
+    roleLabel: latestAttempt.roleLabel || null,
+    result: {
+      passed: Boolean(latestAttempt.passed),
+      trainingPassed: Boolean(latestAttempt.trainingPassed),
+      qcmPassed: Boolean(latestAttempt.passed),
+      modulesComplete: latestAttempt.modulesRead === modules.length,
+      score: latestAttempt.score,
+      correct: latestAttempt.correct,
+      answered: latestAttempt.answered,
+      totalQuestions: latestAttempt.totalQuestions,
+      modulesRead: latestAttempt.modulesRead,
+      totalModules: latestAttempt.totalModules || modules.length,
+      completedAt: latestAttempt.completedAt,
+      timeSpentMs: latestAttempt.timeSpentMs || serverUser.totalTimeMs || 0,
+      moduleTimeMs: serverUser.moduleTimeMs || {},
+      attemptTimeMs: latestAttempt.attemptTimeMs || 0
+    },
+    readModules: latestAttempt.modulesRead === modules.length ? modules.map(module => module.id) : [],
+    answers: latestAttempt.answers || [],
+    longRecord: {
+      latestSnapshot: {
+        attemptId: latestAttempt.attemptId,
+        savedAt: latestAttempt.savedAt || latestAttempt.completedAt
+      }
+    }
+  };
+}
+
+function shouldUseServerProgress(progress) {
+  const localPass = getPassStatus();
+  const result = progress.result || {};
+  const remoteAnswered = Math.max(safeNumber(result.answered), Array.isArray(progress.answers) ? progress.answers.length : 0);
+  const remoteModules = Math.max(safeNumber(result.modulesRead), Array.isArray(progress.readModules) ? progress.readModules.length : 0);
+  const remoteSavedMs = getProgressSavedMs(progress);
+  const localSavedMs = getLocalSavedMs();
+  const localHasProgress = Boolean(state.completedAt)
+    || localPass.answered > 0
+    || state.readModules.length > 0
+    || safeNumber(state.timing?.totalMs) > 0;
+
+  if (!localHasProgress) return true;
+  if (remoteSavedMs && localSavedMs && remoteSavedMs > localSavedMs + 1000) return true;
+  if (result.completedAt && !state.completedAt) return true;
+  if (remoteAnswered > localPass.answered) return true;
+  if (remoteModules > state.readModules.length && remoteAnswered >= localPass.answered) return true;
+  if (safeNumber(result.score) > safeNumber(state.stats?.bestScore) && remoteAnswered >= localPass.answered) return true;
+  return false;
+}
+
+function applyServerProgress(progress, serverUser) {
+  const result = progress.result || {};
+  state.role = resolveRole(progress.role || state.role || currentUser.defaultRole);
+  const questions = getQuestionsForRole();
+  const restoredAnswers = normalizeServerAnswers(progress.answers || [], questions);
+  const restoredOrder = buildQuizOrderFromServerAnswers(restoredAnswers, questions, result.totalQuestions);
+  const restoredReadModules = normalizeReadModulesFromServer(progress, result);
+  const remoteModuleTime = mergeModuleTimes(
+    mergeModuleTimes(result.moduleTimeMs, progress.longRecord?.moduleTimeMs),
+    serverUser?.moduleTimeMs
+  );
+
+  if (restoredOrder.length) state.quizOrder = restoredOrder;
+  state.choiceOrders = {};
+  state.answers = restoredAnswers;
+  state.readModules = restoredReadModules;
+  state.completedAt = result.completedAt || state.completedAt || null;
+  state.currentAttemptId = progress.longRecord?.latestSnapshot?.attemptId
+    || restoredAnswers[0]?.attemptId
+    || state.currentAttemptId
+    || createSessionId();
+  state.attemptStartedAt = getEarliestAnswerStart(restoredAnswers) || state.attemptStartedAt || new Date().toISOString();
+  state.questionStartedAt = state.completedAt ? null : new Date().toISOString();
+  state.quizIndex = getRestoredQuizIndex(restoredAnswers.length, state.quizOrder.length, state.completedAt);
+  state.timing = {
+    ...state.timing,
+    totalMs: Math.max(
+      safeNumber(state.timing?.totalMs),
+      safeNumber(result.timeSpentMs),
+      safeNumber(progress.longRecord?.totalTimeMs),
+      safeNumber(serverUser?.totalTimeMs)
+    ),
+    moduleMs: mergeModuleTimes(state.timing?.moduleMs, remoteModuleTime),
+    activeSince: new Date().toISOString(),
+    lastSavedAt: progress.savedAt || state.timing?.lastSavedAt || null
+  };
+  state.stats.bestScore = Math.max(
+    safeNumber(state.stats?.bestScore),
+    safeNumber(result.score),
+    getBestAttemptScore(serverUser?.attempts)
+  );
+  state.stats.completedCount = Math.max(safeNumber(state.stats?.completedCount), countPassedServerAttempts(serverUser));
+
+  if (longRecord) {
+    longRecord.totalTimeMs = Math.max(safeNumber(longRecord.totalTimeMs), safeNumber(state.timing.totalMs));
+    longRecord.moduleTimeMs = mergeModuleTimes(longRecord.moduleTimeMs, state.timing.moduleMs);
+    longRecord.latestSnapshot = progress.longRecord?.latestSnapshot || {
+      savedAt: progress.savedAt || null,
+      score: result.score ?? null,
+      answered: result.answered ?? null,
+      completedAt: result.completedAt || null
+    };
+    longRecord.lastSavedAt = progress.savedAt || longRecord.lastSavedAt || null;
+  }
+}
+
+function normalizeServerAnswers(answers, questions) {
+  return answers
+    .map(answer => {
+      const question = questions.find(item => item.id === answer?.questionId);
+      if (!question) return null;
+      const selectedIndex = Number.isInteger(answer.answer) ? answer.answer : question.choices.indexOf(answer.answerLabel);
+      if (selectedIndex < 0 || selectedIndex >= question.choices.length) return null;
+      return {
+        ...answer,
+        questionId: question.id,
+        module: question.module,
+        difficulty: question.difficulty,
+        prompt: question.prompt,
+        answer: selectedIndex,
+        answerLabel: question.choices[selectedIndex],
+        correctAnswer: question.answer,
+        correctLabel: question.choices[question.answer],
+        correct: selectedIndex === question.answer
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildQuizOrderFromServerAnswers(answers, questions, totalQuestions) {
+  const order = [];
+  for (const answer of answers) {
+    const questionIndex = questions.findIndex(question => question.id === answer.questionId);
+    if (questionIndex >= 0 && !order.includes(questionIndex)) order.push(questionIndex);
+  }
+
+  const target = Math.max(safeNumber(totalQuestions), order.length);
+  const defaultOrder = buildQuizOrder();
+  for (const questionIndex of defaultOrder) {
+    if (order.length >= target) break;
+    if (!order.includes(questionIndex)) order.push(questionIndex);
+  }
+
+  return order.length ? order : defaultOrder;
+}
+
+function normalizeReadModulesFromServer(progress, result) {
+  const validModuleIds = new Set(modules.map(module => module.id));
+  const explicitModules = Array.isArray(progress.readModules)
+    ? progress.readModules.filter(moduleId => validModuleIds.has(moduleId))
+    : [];
+  if (explicitModules.length) return Array.from(new Set(explicitModules));
+  if (safeNumber(result.modulesRead) >= modules.length) return modules.map(module => module.id);
+  return state.readModules;
+}
+
+function getRestoredQuizIndex(answeredCount, questionCount, completedAt) {
+  if (questionCount <= 0) return 0;
+  if (completedAt) return Math.max(0, Math.min(questionCount - 1, answeredCount - 1));
+  return Math.max(0, Math.min(questionCount - 1, answeredCount));
+}
+
+function resolveRole(roleId) {
+  return roles.some(role => role.id === roleId) ? roleId : currentUser?.defaultRole || "all";
+}
+
+function getEarliestAnswerStart(answers) {
+  return answers
+    .map(answer => answer.questionStartedAt || answer.answeredAt)
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0] || null;
+}
+
+function mergeAttempts(localAttempts = [], serverAttempts = []) {
+  const merged = Array.isArray(localAttempts) ? [...localAttempts] : [];
+  for (const attempt of Array.isArray(serverAttempts) ? serverAttempts : []) {
+    const exists = merged.some(item => item.attemptId === attempt.attemptId || item.completedAt === attempt.completedAt);
+    if (!exists) merged.push(attempt);
+  }
+  return merged.sort((a, b) => getAttemptSavedMs(a) - getAttemptSavedMs(b)).slice(-MAX_LOCAL_ATTEMPTS);
+}
+
+function getBestAttemptScore(attempts = []) {
+  return (Array.isArray(attempts) ? attempts : []).reduce((best, attempt) => Math.max(best, safeNumber(attempt.score)), 0);
+}
+
+function countPassedServerAttempts(serverUser) {
+  return (Array.isArray(serverUser?.attempts) ? serverUser.attempts : []).filter(attempt => attempt.passed).length;
+}
+
+function newestTimestamp(first, second) {
+  const firstMs = Date.parse(first || "");
+  const secondMs = Date.parse(second || "");
+  if (!Number.isFinite(firstMs)) return Number.isFinite(secondMs) ? second : null;
+  if (!Number.isFinite(secondMs)) return first;
+  return secondMs > firstMs ? second : first;
+}
+
+function getProgressSavedMs(progress) {
+  return Math.max(
+    dateMs(progress?.savedAt),
+    dateMs(progress?.result?.completedAt),
+    dateMs(progress?.longRecord?.lastSavedAt),
+    dateMs(progress?.longRecord?.latestSnapshot?.savedAt)
+  );
+}
+
+function getLocalSavedMs() {
+  return Math.max(
+    dateMs(state?.timing?.lastSavedAt),
+    dateMs(state?.completedAt),
+    dateMs(longRecord?.lastSavedAt),
+    dateMs(longRecord?.latestSnapshot?.savedAt)
+  );
+}
+
+function getAttemptSavedMs(attempt) {
+  return Math.max(dateMs(attempt?.savedAt), dateMs(attempt?.completedAt), dateMs(attempt?.startedAt));
+}
+
+function dateMs(value) {
+  const parsed = Date.parse(value || "");
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function saveState(reason, options = {}) {
@@ -1851,7 +2117,7 @@ function resetQuiz() {
 function renderMetrics() {
   const pass = getPassStatus();
   const modulePct = Math.round((state.readModules.length / modules.length) * 100);
-  const scorePct = pass.answered ? pass.score : 0;
+  const scorePct = pass.answered ? pass.score : safeNumber(state.stats?.bestScore);
   const overallPct = Math.round((modulePct + scorePct) / 2);
 
   els.progressLabel.textContent = `${state.readModules.length} / ${modules.length} modules`;
@@ -1866,7 +2132,7 @@ function renderMetrics() {
   if (pass.trainingPassed) {
     const date = new Date(state.completedAt || Date.now()).toLocaleDateString("fr-FR");
     const role = roles.find(item => item.id === state.role)?.label || state.role;
-    els.certificateText.textContent = `${currentUser.name} a validé la sensibilisation LCB-FT Ai For Alpha (${role}) le ${date}, avec ${pass.score}% de bonnes réponses, ${pass.correct}/${pass.answered} réponses correctes, ${state.readModules.length}/${modules.length} modules lus et ${formatDuration(state.timing?.totalMs || 0)} de temps actif.`;
+    els.certificateText.textContent = `${currentUser.name} (${currentUser.email}) a validé la sensibilisation LCB-FT Ai For Alpha (${role}) le ${date}, avec ${pass.score}% de bonnes réponses, ${pass.correct}/${pass.answered} réponses correctes, ${state.readModules.length}/${modules.length} modules lus et ${formatDuration(state.timing?.totalMs || 0)} de temps actif.`;
     els.certificate.classList.add("is-visible");
   } else {
     els.certificate.classList.remove("is-visible");
