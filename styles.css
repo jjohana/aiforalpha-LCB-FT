@@ -748,7 +748,7 @@ p {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -804,7 +804,7 @@ p {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 760px;
+  min-width: 940px;
 }
 
 th,

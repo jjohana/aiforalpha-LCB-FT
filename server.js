@@ -7,6 +7,10 @@ const PORT = Number(process.env.PORT || 4177);
 const ROOT = __dirname;
 const DATA_DIR = path.join(ROOT, "data");
 const DATA_FILE = path.join(DATA_DIR, "training-records.json");
+const DATA_EVENTS_FILE = path.join(DATA_DIR, "training-events.jsonl");
+const DATA_SCHEMA_VERSION = 2;
+const MAX_SERVER_EVENTS = 1000;
+const MAX_SERVER_ATTEMPTS = 200;
 
 const users = [
   { email: "eric.benhamou@aiforalpha.com", name: "Eric Benhamou", defaultRole: "compliance", isAdmin: true },
@@ -32,42 +36,81 @@ function ensureDataFile() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(DATA_FILE)) {
     const initial = {
+      schemaVersion: DATA_SCHEMA_VERSION,
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       users: users.map(user => ({
-        ...user,
-        loginCount: 0,
-        lastLoginAt: null,
-        currentSessionId: null,
-        events: [],
-        latestProgress: null,
-        attempts: []
+        ...createUserRecord(user)
       }))
     };
     fs.writeFileSync(DATA_FILE, JSON.stringify(initial, null, 2), "utf8");
   }
+  if (!fs.existsSync(DATA_EVENTS_FILE)) fs.writeFileSync(DATA_EVENTS_FILE, "", "utf8");
 }
 
 function readData() {
   ensureDataFile();
-  const data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  const data = normalizeData(JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
   for (const user of users) {
     if (!data.users.some(item => item.email === user.email)) {
-      data.users.push({
-        ...user,
-        loginCount: 0,
-        lastLoginAt: null,
-        currentSessionId: null,
-        events: [],
-        latestProgress: null,
-        attempts: []
-      });
+      data.users.push(createUserRecord(user));
     }
   }
   return data;
 }
 
 function writeData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
+  data.schemaVersion = DATA_SCHEMA_VERSION;
+  data.updatedAt = new Date().toISOString();
+  const tempFile = `${DATA_FILE}.tmp`;
+  fs.writeFileSync(tempFile, JSON.stringify(data, null, 2), "utf8");
+  fs.renameSync(tempFile, DATA_FILE);
+}
+
+function appendAuditEvent(event) {
+  ensureDataFile();
+  fs.appendFileSync(DATA_EVENTS_FILE, `${JSON.stringify({ ...event, at: event.at || new Date().toISOString() })}\n`, "utf8");
+}
+
+function createUserRecord(user) {
+  return {
+    ...user,
+    loginCount: 0,
+    lastLoginAt: null,
+    currentSessionId: null,
+    totalTimeMs: 0,
+    moduleTimeMs: {},
+    sessions: [],
+    events: [],
+    latestProgress: null,
+    attempts: []
+  };
+}
+
+function normalizeData(data) {
+  const normalized = data && typeof data === "object" ? data : {};
+  normalized.schemaVersion = normalized.schemaVersion || 1;
+  normalized.createdAt = normalized.createdAt || new Date().toISOString();
+  normalized.updatedAt = normalized.updatedAt || normalized.createdAt;
+  normalized.users = Array.isArray(normalized.users) ? normalized.users.map(normalizeUserRecord) : [];
+  return normalized;
+}
+
+function normalizeUserRecord(record) {
+  const allowed = users.find(user => user.email.toLowerCase() === String(record.email || "").toLowerCase()) || {};
+  return {
+    ...allowed,
+    ...record,
+    loginCount: Number(record.loginCount || 0),
+    lastLoginAt: record.lastLoginAt || null,
+    currentSessionId: record.currentSessionId || null,
+    totalTimeMs: Number(record.totalTimeMs || record.latestProgress?.result?.timeSpentMs || 0),
+    moduleTimeMs: record.moduleTimeMs && typeof record.moduleTimeMs === "object" ? record.moduleTimeMs : {},
+    sessions: Array.isArray(record.sessions) ? record.sessions : [],
+    events: Array.isArray(record.events) ? record.events.slice(-MAX_SERVER_EVENTS) : [],
+    latestProgress: record.latestProgress || null,
+    attempts: Array.isArray(record.attempts) ? record.attempts.slice(-MAX_SERVER_ATTEMPTS) : []
+  };
 }
 
 function findUserRecord(data, email) {
@@ -111,9 +154,42 @@ function sanitizePublicUser(user) {
     isAdmin: user.isAdmin,
     loginCount: user.loginCount,
     lastLoginAt: user.lastLoginAt,
+    totalTimeMs: user.totalTimeMs || 0,
+    moduleTimeMs: user.moduleTimeMs || {},
     latestProgress: user.latestProgress,
     attempts: user.attempts
   };
+}
+
+function isValidSession(user, sessionId) {
+  if (!sessionId) return false;
+  if (user.currentSessionId === sessionId) return true;
+  return Array.isArray(user.sessions) && user.sessions.some(session => session.sessionId === sessionId);
+}
+
+function touchSession(user, sessionId, now) {
+  user.sessions = Array.isArray(user.sessions) ? user.sessions : [];
+  const session = user.sessions.find(item => item.sessionId === sessionId);
+  if (session) {
+    session.lastSeenAt = now;
+    return;
+  }
+  user.sessions.push({ sessionId, createdAt: now, lastSeenAt: now });
+  user.sessions = user.sessions.slice(-50);
+}
+
+function mergeModuleTimes(...sources) {
+  const result = {};
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    for (const [moduleId, value] of Object.entries(source)) {
+      const time = Number(value || 0);
+      if (Number.isFinite(time) && time >= 0) {
+        result[moduleId] = Math.max(Number(result[moduleId] || 0), time);
+      }
+    }
+  }
+  return result;
 }
 
 async function handleApi(req, res, url) {
@@ -133,6 +209,15 @@ async function handleApi(req, res, url) {
     user.loginCount = (user.loginCount || 0) + 1;
     user.lastLoginAt = now;
     user.currentSessionId = sessionId;
+    user.sessions = user.sessions || [];
+    user.sessions.push({
+      sessionId,
+      createdAt: now,
+      lastSeenAt: now,
+      userAgent: req.headers["user-agent"] || null,
+      ip: req.socket.remoteAddress || null
+    });
+    user.sessions = user.sessions.slice(-50);
     user.events = user.events || [];
     user.events.push({
       type: "login",
@@ -141,7 +226,15 @@ async function handleApi(req, res, url) {
       userAgent: req.headers["user-agent"] || null,
       ip: req.socket.remoteAddress || null
     });
-    user.events = user.events.slice(-100);
+    user.events = user.events.slice(-MAX_SERVER_EVENTS);
+    appendAuditEvent({
+      type: "login",
+      email,
+      sessionId,
+      userAgent: req.headers["user-agent"] || null,
+      ip: req.socket.remoteAddress || null,
+      at: now
+    });
     writeData(data);
 
     sendJson(res, 200, { sessionId, user: sanitizePublicUser(user) });
@@ -155,18 +248,27 @@ async function handleApi(req, res, url) {
     const data = readData();
     const user = findUserRecord(data, email);
 
-    if (!user || user.currentSessionId !== sessionId) {
+    if (!user || !isValidSession(user, sessionId)) {
       sendJson(res, 403, { error: "invalid_session" });
       return;
     }
 
     const now = new Date().toISOString();
+    touchSession(user, sessionId, now);
+    user.totalTimeMs = Math.max(
+      Number(user.totalTimeMs || 0),
+      Number(body.result?.timeSpentMs || 0),
+      Number(body.longRecord?.totalTimeMs || 0)
+    );
+    user.moduleTimeMs = mergeModuleTimes(user.moduleTimeMs, body.result?.moduleTimeMs, body.longRecord?.moduleTimeMs);
     user.latestProgress = {
       savedAt: now,
       reason: body.reason || null,
       role: body.learner?.role || null,
       roleLabel: body.learner?.roleLabel || null,
       result: body.result || null,
+      storage: body.storage || null,
+      longRecord: body.longRecord || null,
       readModules: body.readModules || [],
       answers: body.answers || []
     };
@@ -177,15 +279,32 @@ async function handleApi(req, res, url) {
       sessionId,
       reason: body.reason || null,
       score: body.result?.score ?? null,
+      correct: body.result?.correct ?? null,
+      answered: body.result?.answered ?? null,
+      timeSpentMs: body.result?.timeSpentMs ?? null,
       passed: Boolean(body.result?.passed)
     });
-    user.events = user.events.slice(-100);
+    user.events = user.events.slice(-MAX_SERVER_EVENTS);
+    appendAuditEvent({
+      type: "progress",
+      email,
+      sessionId,
+      reason: body.reason || null,
+      score: body.result?.score ?? null,
+      correct: body.result?.correct ?? null,
+      answered: body.result?.answered ?? null,
+      timeSpentMs: body.result?.timeSpentMs ?? null,
+      passed: Boolean(body.result?.passed),
+      at: now
+    });
 
     if (body.result?.completedAt) {
       user.attempts = user.attempts || [];
-      const exists = user.attempts.some(attempt => attempt.completedAt === body.result.completedAt);
+      const attemptId = body.longRecord?.latestSnapshot?.attemptId || body.answers?.[0]?.attemptId || `${sessionId}:${body.result.completedAt}`;
+      const exists = user.attempts.some(attempt => attempt.completedAt === body.result.completedAt || attempt.attemptId === attemptId);
       if (!exists) {
         user.attempts.push({
+          attemptId,
           completedAt: body.result.completedAt,
           savedAt: now,
           role: body.learner?.role || null,
@@ -196,9 +315,12 @@ async function handleApi(req, res, url) {
           totalQuestions: body.result.totalQuestions,
           modulesRead: body.result.modulesRead,
           totalModules: body.result.totalModules,
-          passed: Boolean(body.result.passed)
+          passed: Boolean(body.result.passed),
+          timeSpentMs: body.result.timeSpentMs || null,
+          attemptTimeMs: body.result.attemptTimeMs || null,
+          answers: body.answers || []
         });
-        user.attempts = user.attempts.slice(-20);
+        user.attempts = user.attempts.slice(-MAX_SERVER_ATTEMPTS);
       }
     }
 
@@ -213,7 +335,7 @@ async function handleApi(req, res, url) {
     const data = readData();
     const user = findUserRecord(data, email);
 
-    if (!user || !user.isAdmin || user.currentSessionId !== sessionId) {
+    if (!user || !user.isAdmin || !isValidSession(user, sessionId)) {
       sendJson(res, 403, { error: "admin_required" });
       return;
     }

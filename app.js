@@ -624,18 +624,50 @@ const moduleCourseNotes = {
   }
 };
 
+const APP_STORAGE_VERSION = 4;
+const APP_BUILD = "2026-07-07-long-save";
+const STORAGE_PREFIX = "afa-lcbft-training";
+const LEGACY_STATE_PREFIXES = [
+  "afa-lcbft-training-v3:",
+  "afa-lcbft-training-v2:",
+  "afa-lcbft-training-v1:"
+];
+const MAX_LOCAL_EVENTS = 500;
+const MAX_LOCAL_ATTEMPTS = 200;
+const MAX_TRACKED_DELTA_MS = 5 * 60 * 1000;
+const MAX_QUESTION_TIME_MS = 30 * 60 * 1000;
+
 const stateDefaults = {
+  schemaVersion: APP_STORAGE_VERSION,
+  appBuild: APP_BUILD,
   role: "all",
   activeModule: "model",
   readModules: [],
   quizOrder: [],
   quizIndex: 0,
   answers: [],
-  completedAt: null
+  completedAt: null,
+  currentAttemptId: null,
+  attemptStartedAt: null,
+  questionStartedAt: null,
+  timing: {
+    totalMs: 0,
+    moduleMs: {},
+    activeSince: null,
+    lastSavedAt: null
+  },
+  stats: {
+    firstSeenAt: null,
+    lastLoginAt: null,
+    loginCount: 0,
+    bestScore: 0,
+    completedCount: 0
+  }
 };
 
 let currentUser = null;
-let state = { ...stateDefaults };
+let state = createDefaultState("all");
+let longRecord = null;
 let syncTimer = null;
 
 const els = {
@@ -670,6 +702,7 @@ const els = {
   metricModules: document.getElementById("metricModules"),
   metricAnswered: document.getElementById("metricAnswered"),
   metricCorrect: document.getElementById("metricCorrect"),
+  metricTime: document.getElementById("metricTime"),
   metricStatus: document.getElementById("metricStatus"),
   certificate: document.getElementById("certificate"),
   certificateText: document.getElementById("certificateText"),
@@ -685,6 +718,7 @@ const els = {
 function init() {
   renderAllowedUsers();
   bindEvents();
+  bindPersistenceEvents();
   const restored = restoreSession();
   if (restored) showApp();
 }
@@ -703,6 +737,7 @@ function bindEvents() {
   els.moduleNav.addEventListener("click", event => {
     const button = event.target.closest("[data-module]");
     if (!button) return;
+    saveState("module_leave", { remote: false });
     state.activeModule = button.dataset.module;
     saveState("module_viewed");
     renderAll();
@@ -730,8 +765,10 @@ function bindEvents() {
   els.nextQuestionBtn.addEventListener("click", () => {
     if (state.quizIndex < state.quizOrder.length - 1) {
       state.quizIndex += 1;
+      state.questionStartedAt = new Date().toISOString();
     } else {
       state.completedAt = new Date().toISOString();
+      state.questionStartedAt = null;
       showToast(getPassStatus().passed ? "QCM validé." : "QCM terminé. Recommencez pour atteindre 80%.");
     }
     saveState("quiz_next");
@@ -747,6 +784,25 @@ function bindEvents() {
   els.exportBtn.addEventListener("click", exportProof);
   els.printBtn.addEventListener("click", () => window.print());
   els.logoutBtn.addEventListener("click", logout);
+}
+
+function bindPersistenceEvents() {
+  window.setInterval(() => {
+    if (currentUser && !document.hidden) saveState("heartbeat", { remote: false });
+  }, 30000);
+
+  document.addEventListener("visibilitychange", () => {
+    if (!currentUser) return;
+    if (document.hidden) {
+      flushProgress("tab_hidden");
+    } else {
+      resumeActivityClock();
+      saveState("tab_visible", { remote: false });
+    }
+  });
+
+  window.addEventListener("pagehide", () => flushProgress("pagehide"));
+  window.addEventListener("beforeunload", () => flushProgress("beforeunload"));
 }
 
 function renderAllowedUsers() {
@@ -778,6 +834,7 @@ async function login(rawEmail) {
   loadState();
   if (!state.role || state.role === "all") state.role = user.defaultRole || "all";
   ensureQuizOrder();
+  ensureQuestionTimer();
   saveState("login");
   showApp();
   showToast(serverMode ? "Connexion enregistrée." : "Connexion locale : serveur de suivi indisponible.");
@@ -793,6 +850,8 @@ function restoreSession() {
     currentUser = { ...user, sessionId: parsed.sessionId, serverMode: parsed.serverMode };
     loadState();
     ensureQuizOrder();
+    ensureQuestionTimer();
+    saveState("session_restored", { remote: false });
     return true;
   } catch {
     return false;
@@ -807,43 +866,336 @@ function showApp() {
 }
 
 function logout() {
+  flushProgress("logout");
   sessionStorage.removeItem("afa-lcbft-session");
   currentUser = null;
-  state = { ...stateDefaults };
+  state = createDefaultState("all");
+  longRecord = null;
   els.appShell.classList.add("is-hidden");
   els.loginScreen.classList.remove("is-hidden");
   els.loginEmail.value = "";
   els.loginMessage.textContent = "";
 }
 
-function stateKey() {
-  return `afa-lcbft-training-v3:${currentUser.email}`;
+function createDefaultState(role) {
+  const now = new Date().toISOString();
+  return {
+    ...stateDefaults,
+    schemaVersion: APP_STORAGE_VERSION,
+    appBuild: APP_BUILD,
+    role: role || "all",
+    readModules: [],
+    quizOrder: [],
+    answers: [],
+    currentAttemptId: createSessionId(),
+    attemptStartedAt: now,
+    questionStartedAt: now,
+    timing: {
+      totalMs: 0,
+      moduleMs: {},
+      activeSince: now,
+      lastSavedAt: now
+    },
+    stats: {
+      firstSeenAt: now,
+      lastLoginAt: now,
+      loginCount: 0,
+      bestScore: 0,
+      completedCount: 0
+    }
+  };
+}
+
+function stateKey(email = currentUser?.email) {
+  return `${STORAGE_PREFIX}:state:${String(email || "").toLowerCase()}`;
+}
+
+function recordKey(email = currentUser?.email) {
+  return `${STORAGE_PREFIX}:record:${String(email || "").toLowerCase()}`;
+}
+
+function legacyStateKeys(email = currentUser?.email) {
+  return LEGACY_STATE_PREFIXES.map(prefix => `${prefix}${String(email || "").toLowerCase()}`);
 }
 
 function loadState() {
   const initialRole = currentUser?.defaultRole || "all";
-  state = { ...stateDefaults, role: initialRole };
-  try {
-    const raw = localStorage.getItem(stateKey());
-    if (raw) state = { ...state, ...JSON.parse(raw) };
-  } catch {
-    state = { ...stateDefaults, role: initialRole };
+  const stored = readJsonStorage(stateKey()) || readLegacyState();
+  state = normalizeState(stored, initialRole);
+  longRecord = normalizeLongRecord(readJsonStorage(recordKey()));
+  migrateLegacyStateIfNeeded(stored);
+  registerLoginLocally();
+  resumeActivityClock();
+}
+
+function readLegacyState() {
+  for (const key of legacyStateKeys()) {
+    const value = readJsonStorage(key);
+    if (value) return { ...value, migratedFromKey: key };
+  }
+  return null;
+}
+
+function migrateLegacyStateIfNeeded(stored) {
+  if (!stored?.migratedFromKey) return;
+  appendLocalEvent("migration", { fromKey: stored.migratedFromKey, toKey: stateKey() });
+  writeJsonStorage(stateKey(), state);
+}
+
+function normalizeState(stored, initialRole) {
+  const base = createDefaultState(initialRole);
+  const merged = stored && typeof stored === "object" ? { ...base, ...stored } : base;
+  const timing = stored?.timing && typeof stored.timing === "object" ? stored.timing : {};
+  const stats = stored?.stats && typeof stored.stats === "object" ? stored.stats : {};
+
+  merged.schemaVersion = APP_STORAGE_VERSION;
+  merged.appBuild = APP_BUILD;
+  merged.role = merged.role || initialRole;
+  merged.activeModule = modules.some(module => module.id === merged.activeModule) ? merged.activeModule : "model";
+  merged.readModules = Array.isArray(merged.readModules) ? merged.readModules.filter(id => modules.some(module => module.id === id)) : [];
+  merged.quizOrder = Array.isArray(merged.quizOrder) ? merged.quizOrder : [];
+  merged.quizIndex = Number.isInteger(merged.quizIndex) && merged.quizIndex >= 0 ? merged.quizIndex : 0;
+  merged.answers = Array.isArray(merged.answers) ? merged.answers : [];
+  merged.currentAttemptId = merged.currentAttemptId || createSessionId();
+  merged.attemptStartedAt = merged.attemptStartedAt || new Date().toISOString();
+  merged.questionStartedAt = merged.questionStartedAt || new Date().toISOString();
+  merged.timing = {
+    totalMs: safeNumber(timing.totalMs),
+    moduleMs: timing.moduleMs && typeof timing.moduleMs === "object" ? timing.moduleMs : {},
+    activeSince: timing.activeSince || new Date().toISOString(),
+    lastSavedAt: timing.lastSavedAt || null
+  };
+  merged.stats = {
+    firstSeenAt: stats.firstSeenAt || new Date().toISOString(),
+    lastLoginAt: stats.lastLoginAt || null,
+    loginCount: safeNumber(stats.loginCount),
+    bestScore: safeNumber(stats.bestScore),
+    completedCount: safeNumber(stats.completedCount)
+  };
+  return merged;
+}
+
+function normalizeLongRecord(stored) {
+  const now = new Date().toISOString();
+  const record = stored && typeof stored === "object" ? stored : {};
+  return {
+    schemaVersion: APP_STORAGE_VERSION,
+    appBuild: APP_BUILD,
+    email: currentUser.email,
+    name: currentUser.name,
+    firstSeenAt: record.firstSeenAt || state.stats.firstSeenAt || now,
+    lastLoginAt: record.lastLoginAt || null,
+    loginCount: safeNumber(record.loginCount),
+    totalTimeMs: Math.max(safeNumber(record.totalTimeMs), safeNumber(state.timing?.totalMs)),
+    moduleTimeMs: record.moduleTimeMs && typeof record.moduleTimeMs === "object" ? record.moduleTimeMs : { ...(state.timing?.moduleMs || {}) },
+    events: Array.isArray(record.events) ? record.events.slice(-MAX_LOCAL_EVENTS) : [],
+    attempts: Array.isArray(record.attempts) ? record.attempts.slice(-MAX_LOCAL_ATTEMPTS) : [],
+    latestSnapshot: record.latestSnapshot || null,
+    lastSavedAt: record.lastSavedAt || null
+  };
+}
+
+function registerLoginLocally() {
+  const now = new Date().toISOString();
+  state.stats.firstSeenAt = state.stats.firstSeenAt || now;
+  state.stats.lastLoginAt = now;
+  state.stats.loginCount = safeNumber(state.stats.loginCount) + 1;
+  longRecord.firstSeenAt = longRecord.firstSeenAt || state.stats.firstSeenAt;
+  longRecord.lastLoginAt = now;
+  longRecord.loginCount = safeNumber(longRecord.loginCount) + 1;
+  appendLocalEvent("login", { sessionId: currentUser.sessionId, serverMode: Boolean(currentUser.serverMode) });
+}
+
+function saveState(reason, options = {}) {
+  if (!currentUser) return;
+  updateTrackedTime(reason);
+  persistLocalRecord(reason);
+  if (options.remote !== false) scheduleSync(reason);
+}
+
+function persistLocalRecord(reason) {
+  if (!currentUser || !longRecord) return;
+  const now = new Date().toISOString();
+  const pass = getPassStatus();
+  state.schemaVersion = APP_STORAGE_VERSION;
+  state.appBuild = APP_BUILD;
+  state.timing.lastSavedAt = now;
+  state.stats.bestScore = Math.max(safeNumber(state.stats.bestScore), safeNumber(pass.score));
+
+  longRecord.schemaVersion = APP_STORAGE_VERSION;
+  longRecord.appBuild = APP_BUILD;
+  longRecord.email = currentUser.email;
+  longRecord.name = currentUser.name;
+  longRecord.totalTimeMs = Math.max(safeNumber(longRecord.totalTimeMs), safeNumber(state.timing.totalMs));
+  longRecord.moduleTimeMs = mergeModuleTimes(longRecord.moduleTimeMs, state.timing.moduleMs);
+  longRecord.latestSnapshot = buildLocalSnapshot(reason);
+  longRecord.lastSavedAt = now;
+  recordCompletedAttemptIfNeeded();
+  state.stats.completedCount = countPassedAttempts();
+
+  writeJsonStorage(stateKey(), state);
+  writeJsonStorage(recordKey(), longRecord);
+}
+
+function buildLocalSnapshot(reason) {
+  const pass = getPassStatus();
+  return {
+    savedAt: new Date().toISOString(),
+    reason,
+    attemptId: state.currentAttemptId,
+    role: state.role,
+    roleLabel: roles.find(item => item.id === state.role)?.label || state.role,
+    score: pass.score,
+    correct: pass.correct,
+    answered: pass.answered,
+    totalQuestions: state.quizOrder.length,
+    modulesRead: state.readModules.length,
+    totalModules: modules.length,
+    passed: pass.passed,
+    completedAt: state.completedAt,
+    timeSpentMs: safeNumber(state.timing.totalMs),
+    timeSpentLabel: formatDuration(state.timing.totalMs)
+  };
+}
+
+function appendLocalEvent(type, details = {}) {
+  if (!longRecord) return;
+  longRecord.events = Array.isArray(longRecord.events) ? longRecord.events : [];
+  longRecord.events.push({
+    type,
+    at: new Date().toISOString(),
+    appBuild: APP_BUILD,
+    ...details
+  });
+  longRecord.events = longRecord.events.slice(-MAX_LOCAL_EVENTS);
+}
+
+function recordCompletedAttemptIfNeeded() {
+  if (!state.completedAt || !longRecord) return;
+  longRecord.attempts = Array.isArray(longRecord.attempts) ? longRecord.attempts : [];
+  const attemptId = state.currentAttemptId || `${currentUser.email}:${state.completedAt}`;
+  if (longRecord.attempts.some(attempt => attempt.attemptId === attemptId || attempt.completedAt === state.completedAt)) return;
+  const pass = getPassStatus();
+  const attempt = {
+    attemptId,
+    startedAt: state.attemptStartedAt,
+    completedAt: state.completedAt,
+    role: state.role,
+    roleLabel: roles.find(item => item.id === state.role)?.label || state.role,
+    score: pass.score,
+    correct: pass.correct,
+    answered: pass.answered,
+    totalQuestions: state.quizOrder.length,
+    modulesRead: state.readModules.length,
+    totalModules: modules.length,
+    passed: pass.passed,
+    timeSpentMs: getAttemptTimeMs(),
+    answers: state.answers.filter(Boolean)
+  };
+  longRecord.attempts.push(attempt);
+  longRecord.attempts = longRecord.attempts.slice(-MAX_LOCAL_ATTEMPTS);
+  appendLocalEvent("attempt_completed", {
+    attemptId,
+    score: pass.score,
+    correct: pass.correct,
+    answered: pass.answered,
+    passed: pass.passed,
+    timeSpentMs: attempt.timeSpentMs
+  });
+}
+
+function resumeActivityClock() {
+  if (!state.timing) state.timing = createDefaultState(state.role).timing;
+  state.timing.activeSince = new Date().toISOString();
+}
+
+function updateTrackedTime(reason) {
+  if (!state.timing) state.timing = createDefaultState(state.role).timing;
+  const now = Date.now();
+  const previous = Date.parse(state.timing.activeSince || "");
+  const delta = Number.isFinite(previous) ? Math.max(0, now - previous) : 0;
+  const tracked = document.hidden ? 0 : Math.min(delta, MAX_TRACKED_DELTA_MS);
+
+  if (tracked > 0) {
+    state.timing.totalMs = safeNumber(state.timing.totalMs) + tracked;
+    state.timing.moduleMs = state.timing.moduleMs || {};
+    state.timing.moduleMs[state.activeModule] = safeNumber(state.timing.moduleMs[state.activeModule]) + tracked;
+    if (longRecord) {
+      longRecord.totalTimeMs = safeNumber(longRecord.totalTimeMs) + tracked;
+      longRecord.moduleTimeMs = longRecord.moduleTimeMs || {};
+      longRecord.moduleTimeMs[state.activeModule] = safeNumber(longRecord.moduleTimeMs[state.activeModule]) + tracked;
+    }
+  }
+
+  state.timing.activeSince = new Date(now).toISOString();
+  if (reason && reason !== "heartbeat") appendLocalEvent(reason, { trackedMs: tracked });
+}
+
+function flushProgress(reason) {
+  if (!currentUser) return;
+  saveState(reason, { remote: false });
+  if (currentUser.serverMode && navigator.sendBeacon) {
+    const blob = new Blob([JSON.stringify(buildProofPayload(reason))], { type: "application/json" });
+    navigator.sendBeacon("/api/progress", blob);
   }
 }
 
-function saveState(reason) {
-  if (!currentUser) return;
-  localStorage.setItem(stateKey(), JSON.stringify(state));
-  scheduleSync(reason);
+function readJsonStorage(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeJsonStorage(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    showToast("Stockage local saturé : exportez la preuve JSON.");
+  }
+}
+
+function mergeModuleTimes(primary = {}, secondary = {}) {
+  const result = { ...primary };
+  for (const module of modules) {
+    const id = module.id;
+    result[id] = Math.max(safeNumber(primary[id]), safeNumber(secondary[id]));
+  }
+  return result;
+}
+
+function countPassedAttempts() {
+  return longRecord?.attempts?.filter(attempt => attempt.passed).length || 0;
+}
+
+function getAttemptTimeMs() {
+  const answeredTime = state.answers
+    .filter(Boolean)
+    .reduce((sum, answer) => sum + safeNumber(answer.timeToAnswerMs), 0);
+  if (answeredTime > 0) return answeredTime;
+  const started = Date.parse(state.attemptStartedAt || "");
+  const completed = Date.parse(state.completedAt || "");
+  return Number.isFinite(started) && Number.isFinite(completed) ? Math.max(0, completed - started) : 0;
+}
+
+function safeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
 }
 
 function setRole(roleId) {
   if (state.role === roleId) return;
+  saveState("role_leave", { remote: false });
   state.role = roleId;
   state.quizOrder = [];
   state.quizIndex = 0;
   state.answers = [];
   state.completedAt = null;
+  state.currentAttemptId = createSessionId();
+  state.attemptStartedAt = new Date().toISOString();
+  state.questionStartedAt = state.attemptStartedAt;
   ensureQuizOrder();
   saveState("role_changed");
   renderAll();
@@ -857,7 +1209,15 @@ function ensureQuizOrder() {
     state.quizIndex = 0;
     state.answers = [];
     state.completedAt = null;
+    state.currentAttemptId = state.currentAttemptId || createSessionId();
+    state.attemptStartedAt = state.attemptStartedAt || new Date().toISOString();
+    state.questionStartedAt = state.questionStartedAt || state.attemptStartedAt;
   }
+}
+
+function ensureQuestionTimer() {
+  if (state.completedAt || hasAnsweredCurrent()) return;
+  state.questionStartedAt = new Date().toISOString();
 }
 
 function buildQuizOrder() {
@@ -1174,18 +1534,31 @@ function normalizeForLesson(value) {
 function submitAnswer(answer) {
   const question = getCurrentQuestion();
   const correct = answer === question.answer;
+  const answeredAt = new Date();
   state.answers[state.quizIndex] = {
+    attemptId: state.currentAttemptId,
     questionId: question.id,
     module: question.module,
     difficulty: question.difficulty,
     prompt: question.prompt,
     answer,
+    answerLabel: question.choices[answer],
+    correctAnswer: question.answer,
+    correctLabel: question.choices[question.answer],
     correct,
-    answeredAt: new Date().toISOString()
+    answeredAt: answeredAt.toISOString(),
+    questionStartedAt: state.questionStartedAt,
+    timeToAnswerMs: getQuestionElapsedMs(answeredAt)
   };
   saveState("answer_submitted");
   renderQuestion();
   renderMetrics();
+}
+
+function getQuestionElapsedMs(answeredAt = new Date()) {
+  const started = Date.parse(state.questionStartedAt || "");
+  if (!Number.isFinite(started)) return 0;
+  return Math.min(Math.max(0, answeredAt.getTime() - started), MAX_QUESTION_TIME_MS);
 }
 
 function hasAnsweredCurrent() {
@@ -1203,6 +1576,9 @@ function resetQuiz() {
   state.quizIndex = 0;
   state.answers = [];
   state.completedAt = null;
+  state.currentAttemptId = createSessionId();
+  state.attemptStartedAt = new Date().toISOString();
+  state.questionStartedAt = state.attemptStartedAt;
   saveState("quiz_reset");
   renderAll();
 }
@@ -1219,12 +1595,13 @@ function renderMetrics() {
   els.metricModules.textContent = state.readModules.length;
   els.metricAnswered.textContent = pass.answered;
   els.metricCorrect.textContent = pass.correct;
+  els.metricTime.textContent = formatDuration(state.timing?.totalMs || 0);
   els.metricStatus.textContent = pass.passed ? "Validé" : "À faire";
 
   if (pass.passed) {
     const date = new Date(state.completedAt || Date.now()).toLocaleDateString("fr-FR");
     const role = roles.find(item => item.id === state.role)?.label || state.role;
-    els.certificateText.textContent = `${currentUser.name} a validé la sensibilisation LCB-FT Ai For Alpha (${role}) le ${date}, avec ${pass.score}% de bonnes réponses et ${state.readModules.length}/${modules.length} modules lus.`;
+    els.certificateText.textContent = `${currentUser.name} a validé la sensibilisation LCB-FT Ai For Alpha (${role}) le ${date}, avec ${pass.score}% de bonnes réponses, ${pass.correct}/${pass.answered} réponses correctes, ${state.readModules.length}/${modules.length} modules lus et ${formatDuration(state.timing?.totalMs || 0)} de temps actif.`;
     els.certificate.classList.add("is-visible");
   } else {
     els.certificate.classList.remove("is-visible");
@@ -1275,6 +1652,13 @@ function buildProofPayload(reason) {
       validationDate: "2026-07-06",
       sharePointSite: "Ai For Alpha Documents / Compliance & Legal"
     },
+    storage: {
+      schemaVersion: APP_STORAGE_VERSION,
+      appBuild: APP_BUILD,
+      stateKey: stateKey(),
+      recordKey: recordKey(),
+      longSaveMode: true
+    },
     result: {
       passed: pass.passed,
       score: pass.score,
@@ -1283,7 +1667,21 @@ function buildProofPayload(reason) {
       totalQuestions: state.quizOrder.length,
       modulesRead: state.readModules.length,
       totalModules: modules.length,
-      completedAt: state.completedAt
+      completedAt: state.completedAt,
+      timeSpentMs: safeNumber(state.timing?.totalMs),
+      timeSpentLabel: formatDuration(state.timing?.totalMs || 0),
+      moduleTimeMs: state.timing?.moduleMs || {},
+      attemptTimeMs: getAttemptTimeMs()
+    },
+    longRecord: {
+      firstSeenAt: longRecord?.firstSeenAt || null,
+      lastLoginAt: longRecord?.lastLoginAt || null,
+      loginCount: longRecord?.loginCount || 0,
+      totalTimeMs: longRecord?.totalTimeMs || 0,
+      totalTimeLabel: formatDuration(longRecord?.totalTimeMs || 0),
+      moduleTimeMs: longRecord?.moduleTimeMs || {},
+      attempts: longRecord?.attempts || [],
+      latestSnapshot: longRecord?.latestSnapshot || null
     },
     readModules: state.readModules,
     answers: state.answers.filter(Boolean),
@@ -1308,13 +1706,15 @@ async function refreshAdmin() {
 
 function renderAdminRows(users) {
   if (!users.length) {
-    els.adminRows.innerHTML = `<tr><td colspan="6">Aucune donnée de suivi disponible.</td></tr>`;
+    els.adminRows.innerHTML = `<tr><td colspan="8">Aucune donnée de suivi disponible.</td></tr>`;
     return;
   }
 
   els.adminRows.innerHTML = users.map(user => {
     const latest = user.latestProgress?.result || {};
     const score = Number.isFinite(latest.score) ? `${latest.score}%` : "-";
+    const correct = Number.isFinite(latest.correct) && Number.isFinite(latest.answered) ? `${latest.correct}/${latest.answered}` : "-";
+    const timeSpent = formatDuration(latest.timeSpentMs || user.totalTimeMs || user.longRecord?.totalTimeMs || 0);
     const modulesText = `${latest.modulesRead || 0}/${latest.totalModules || modules.length}`;
     const status = latest.passed ? "Validé" : "En cours";
     const lastLogin = user.lastLoginAt ? formatDateTime(user.lastLoginAt) : "-";
@@ -1324,6 +1724,8 @@ function renderAdminRows(users) {
         <td>${escapeHtml(lastLogin)}</td>
         <td>${user.loginCount || 0}</td>
         <td>${score}</td>
+        <td>${correct}</td>
+        <td>${timeSpent}</td>
         <td>${modulesText}</td>
         <td><span class="status-chip${latest.passed ? " is-ok" : ""}">${status}</span></td>
       </tr>
@@ -1342,14 +1744,19 @@ function buildLocalAdminFallback() {
       result: {
         passed: pass.passed,
         score: pass.score,
+        correct: pass.correct,
+        answered: pass.answered,
         modulesRead: state.readModules.length,
-        totalModules: modules.length
+        totalModules: modules.length,
+        timeSpentMs: state.timing?.totalMs || 0
       }
-    }
+    },
+    totalTimeMs: longRecord?.totalTimeMs || state.timing?.totalMs || 0
   }];
 }
 
 function exportProof() {
+  saveState("export", { remote: false });
   const payload = buildProofPayload("export");
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -1390,6 +1797,16 @@ function formatDateTime(value) {
     dateStyle: "short",
     timeStyle: "short"
   });
+}
+
+function formatDuration(value) {
+  const totalSeconds = Math.max(0, Math.round(safeNumber(value) / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours} h ${String(minutes).padStart(2, "0")} min`;
+  if (minutes > 0) return `${minutes} min ${String(seconds).padStart(2, "0")} s`;
+  return `${seconds} s`;
 }
 
 function showToast(message) {

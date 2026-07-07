@@ -23,6 +23,10 @@ Puis ouvrir `http://localhost:4177`.
 
 Le prototype accepte l'email sans mot de passe. En production, remplacer ce mécanisme par Microsoft Entra ID / SSO.
 
-## Suivi
+## Suivi et sauvegarde longue durée
 
-Le serveur local consigne les connexions, progressions, scores et tentatives dans `data/training-records.json`.
+Le navigateur conserve un registre local durable par email avec une clé stable, sans numéro de version dans le nom. Les anciennes clés `afa-lcbft-training-v*` sont migrées automatiquement, ce qui évite de perdre la progression lors d'une nouvelle version du site.
+
+Le registre local conserve les connexions, le temps actif total, le temps par module, les réponses, les bonnes réponses, les scores, les tentatives terminées et le dernier snapshot de progression.
+
+Le serveur local consigne aussi ces données dans `data/training-records.json` avec écriture atomique, et écrit un journal append-only dans `data/training-events.jsonl`.
