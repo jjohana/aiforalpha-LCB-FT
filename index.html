@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ai For Alpha - Formation LCB-FT</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <section id="loginScreen" class="login-screen" aria-labelledby="loginTitle">
+    <div class="login-panel">
+      <div class="brand-row">
+        <div class="brand-logo-panel">
+          <img class="brand-logo" src="./assets/Logo_Ai-for-Alpha.svg" alt="Ai For Alpha">
+        </div>
+        <div>
+          <p class="eyebrow">Formation réglementaire</p>
+          <h1 id="loginTitle">Formation LCB-FT</h1>
+        </div>
+      </div>
+      <p class="login-copy">
+        Accès réservé aux collaborateurs déclarés. Les connexions, modules lus, scores et validations sont consignés pour le registre conformité.
+      </p>
+      <form id="loginForm" class="login-form">
+        <label for="loginEmail">Email professionnel</label>
+        <input id="loginEmail" type="email" autocomplete="email" placeholder="prenom.nom@aiforalpha.com" required>
+        <button class="primary" type="submit">Se connecter</button>
+      </form>
+      <p id="loginMessage" class="form-message" aria-live="polite"></p>
+      <div class="allowed-list" id="allowedList"></div>
+    </div>
+  </section>
+
+  <div id="appShell" class="app-shell is-hidden">
+    <aside class="sidebar" aria-label="Navigation formation">
+      <div class="brand-row compact">
+        <img class="brand-logo sidebar-logo" src="./assets/Logo_Ai-for-Alpha.svg" alt="Ai For Alpha">
+        <div>
+          <p class="eyebrow">LCB-FT</p>
+          <h1>Training Hub</h1>
+        </div>
+      </div>
+
+      <div class="source-box">
+        <strong>Source interne</strong>
+        Procédure LCB-FT Ai For Alpha 2026, validée le 06/07/2026.
+      </div>
+
+      <nav>
+        <p class="nav-title">Modules</p>
+        <div id="moduleNav" class="module-nav"></div>
+      </nav>
+
+      <div class="sidebar-actions">
+        <button id="exportBtn" class="ghost-dark" type="button">Exporter la preuve</button>
+        <button id="printBtn" class="ghost-dark" type="button">Imprimer l'attestation</button>
+        <button id="logoutBtn" class="ghost-dark" type="button">Déconnexion</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow dark">Participant</p>
+          <div class="session-line">
+            <strong id="currentUserLabel"></strong>
+            <span id="currentRoleLabel"></span>
+          </div>
+        </div>
+        <div class="score-strip" aria-live="polite">
+          <div class="score-top">
+            <span id="progressLabel">0 / 7 modules</span>
+            <span id="scoreLabel">Score QCM : 0%</span>
+          </div>
+          <div class="progress-track" aria-hidden="true">
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+        </div>
+      </header>
+
+      <section class="content">
+        <div class="role-band" id="roleBand"></div>
+
+        <div class="training-grid">
+          <article class="panel module-panel" aria-labelledby="moduleTitle">
+            <div class="panel-header">
+              <div>
+                <p id="moduleKicker" class="eyebrow dark"></p>
+                <h2 id="moduleTitle"></h2>
+              </div>
+              <span id="moduleAudience" class="pill"></span>
+            </div>
+            <div class="panel-body">
+              <p id="moduleLead" class="module-lead"></p>
+              <ul id="modulePoints" class="key-points"></ul>
+              <div id="moduleVisual" class="module-visual"></div>
+              <div class="actions">
+                <button id="markReadBtn" class="secondary" type="button">Marquer le module lu</button>
+                <button id="nextModuleBtn" class="primary" type="button">Module suivant</button>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel quiz-panel" aria-labelledby="questionText">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow dark">QCM de validation</p>
+                <div class="quiz-meta">
+                  <span id="questionCount" class="tag"></span>
+                  <span id="difficultyTag" class="tag"></span>
+                  <span class="tag">Seuil : 80%</span>
+                </div>
+              </div>
+            </div>
+            <div class="panel-body">
+              <p id="questionText" class="question-text"></p>
+              <div id="answers" class="answers"></div>
+              <div id="explanation" class="explanation"></div>
+              <div class="actions">
+                <button id="nextQuestionBtn" class="primary" type="button" disabled>Question suivante</button>
+                <button id="restartQuizBtn" class="secondary" type="button">Recommencer</button>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <section class="metrics" aria-label="Suivi personnel">
+          <div class="metric">
+            <strong id="metricModules">0</strong>
+            <span>Modules lus</span>
+          </div>
+          <div class="metric">
+            <strong id="metricAnswered">0</strong>
+            <span>Questions traitées</span>
+          </div>
+          <div class="metric">
+            <strong id="metricCorrect">0</strong>
+            <span>Bonnes réponses</span>
+          </div>
+          <div class="metric">
+            <strong id="metricStatus">À faire</strong>
+            <span>Statut</span>
+          </div>
+        </section>
+
+        <section id="certificate" class="certificate" aria-live="polite">
+          <h2>Attestation de sensibilisation LCB-FT</h2>
+          <p id="certificateText"></p>
+        </section>
+
+        <section id="adminPanel" class="panel admin-panel is-hidden" aria-labelledby="adminTitle">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow dark">Registre conformité</p>
+              <h2 id="adminTitle">Connexions et scores</h2>
+            </div>
+            <button id="refreshAdminBtn" class="secondary" type="button">Actualiser</button>
+          </div>
+          <div class="panel-body">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Collaborateur</th>
+                    <th>Dernière connexion</th>
+                    <th>Connexions</th>
+                    <th>Score</th>
+                    <th>Modules</th>
+                    <th>Statut</th>
+                  </tr>
+                </thead>
+                <tbody id="adminRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <p class="footer-note">
+          Prototype local : pour un usage officiel multi-utilisateur, brancher ce parcours sur Microsoft Entra ID et une base de suivi centralisée.
+        </p>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="./app.js"></script>
+</body>
+</html>
