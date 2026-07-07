@@ -587,9 +587,19 @@ p {
   align-items: start;
 }
 
-.answer span:last-child {
+.answer-copy {
+  display: grid;
+  gap: 7px;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.answer-lesson {
+  display: block;
+  color: var(--aifa-gray);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .answer:hover {
@@ -643,6 +653,52 @@ p {
 
 .explanation.is-visible {
   display: block;
+}
+
+.course-correction {
+  display: grid;
+  gap: 12px;
+}
+
+.course-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--white);
+  border: 1px solid var(--line);
+}
+
+.course-status strong {
+  color: var(--aifa-navy);
+}
+
+.course-status span {
+  color: var(--aifa-gray);
+  font-weight: 700;
+}
+
+.course-status.is-ok {
+  border-color: rgba(27, 107, 144, 0.42);
+}
+
+.course-status.is-ko {
+  border-color: rgba(224, 144, 3, 0.58);
+}
+
+.course-block {
+  display: grid;
+  gap: 4px;
+}
+
+.course-block strong {
+  color: var(--aifa-blue);
+}
+
+.course-block p {
+  margin: 0;
 }
 
 .actions {

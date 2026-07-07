@@ -171,10 +171,10 @@ const questionBank = [
     roles: ["all", "research", "partner"],
     prompt: "Un data scientist reçoit directement une demande d'accès à un flux de signaux par une personne non validée dans un dossier client. Que doit-il faire ?",
     choices: [
-      "Créer un accès temporaire en lecture seule.",
+      "Créer un accès temporaire en lecture seule jusqu'à validation commerciale.",
       "Ne pas ouvrir l'accès et remonter la demande au circuit onboarding/conformité.",
-      "Envoyer les signaux par email personnel.",
-      "Demander uniquement une carte de visite."
+      "Envoyer un extrait de signaux pour qualifier le besoin avant onboarding.",
+      "Demander une carte de visite et l'ajouter au dossier sans escalade."
     ],
     answer: 1,
     explanation: "Les profils non client-facing reçoivent une sensibilisation courte : ne pas traiter seuls la relation et remonter les signaux inhabituels."
@@ -202,9 +202,9 @@ const questionBank = [
     prompt: "Laquelle de ces informations fait partie de l'identification minimale d'une personne morale cliente ?",
     choices: [
       "Dénomination, forme juridique, pays, adresse, immatriculation ou identifiant équivalent.",
-      "Préférences personnelles du dirigeant.",
-      "Historique complet de tous les ordres de bourse du client.",
-      "Mot de passe du compte bancaire."
+      "Dénomination et site web uniquement, si le prospect est institutionnel.",
+      "Nom du signataire uniquement, car la relation est portée par le contrat.",
+      "Première facture payée, car le paiement confirme l'existence du client."
     ],
     answer: 0,
     explanation: "L'identification porte sur l'existence et la cohérence de l'entité, pas sur des données inutiles ou disproportionnées."
@@ -216,10 +216,10 @@ const questionBank = [
     roles: ["client", "compliance", "partner"],
     prompt: "Un prospect est présenté par un apporteur et souhaite une mise en relation à distance avec diffusion de signaux aux États-Unis. Quel point doit être qualifié ?",
     choices: [
-      "Uniquement le montant de la facture.",
+      "Le montant de la facture et le nom du commercial, puis compléter le reste après signature.",
       "Le type de service, le canal, les pays, le rôle de l'apporteur, le payeur attendu et l'élément cross-border.",
-      "Uniquement le nom du commercial référent.",
-      "Aucun point spécifique si le prospect est institutionnel."
+      "Le canal de diffusion et le pays uniquement, car l'apporteur prend en charge le reste.",
+      "Le statut institutionnel du prospect, qui suffit à neutraliser l'élément cross-border."
     ],
     answer: 1,
     explanation: "La cartographie et l'onboarding tiennent compte du service, du canal, de la géographie, de l'apporteur, du payeur et du cross-border."
@@ -278,7 +278,7 @@ const questionBank = [
     choices: [
       "Identifier l'entité, son régime juridique, les signataires et l'organisme de supervision ou de tutelle.",
       "Demander l'identité de tous les bénéficiaires du régime.",
-      "Ne faire aucun screening.",
+      "Limiter le dossier au statut public ou assimilé, sans identifier les signataires.",
       "Exiger un justificatif de patrimoine de chaque adhérent."
     ],
     answer: 0,
@@ -312,7 +312,7 @@ const questionBank = [
       "Renouvellement sans changement significatif."
     ],
     answer: 1,
-    explanation: "Ces signaux correspondent aux facteurs de risque élevé de la procédure."
+    explanation: "Le cumul structure opaque, pays sensible, paiement tiers non expliqué et pression opérationnelle concentre plusieurs facteurs de risque élevé et impose une escalade avant poursuite."
   },
   {
     id: "q-risk-3",
@@ -336,10 +336,10 @@ const questionBank = [
     roles: ["client", "compliance"],
     prompt: "Un client US institutionnel est transparent, mais la relation est transfrontalière et à distance. Quel niveau est le plus cohérent avant analyse finale ?",
     choices: [
-      "Toujours faible, car le client est institutionnel.",
+      "Faible sans autre analyse, car le client est institutionnel.",
       "Modéré si les éléments cross-border sont maîtrisables et documentés.",
-      "Toujours élevé, sans possibilité de poursuite.",
-      "Hors périmètre LCB-FT."
+      "Élevé par défaut sans regarder les éléments de transparence.",
+      "Hors périmètre LCB-FT parce que la relation est transfrontalière."
     ],
     answer: 1,
     explanation: "La procédure cite les clients US institutionnels et configurations transfrontalières maîtrisables parmi les cas modérés."
@@ -351,13 +351,13 @@ const questionBank = [
     roles: ["all", "client", "partner", "compliance"],
     prompt: "Quels noms doivent être screenés a minima ?",
     choices: [
-      "Uniquement le nom commercial.",
+      "Le nom commercial et le signataire principal seulement.",
       "L'entité cliente, noms commerciaux connus, signataires, représentants habilités, dirigeants pertinents et bénéficiaires effectifs lorsque requis.",
-      "Uniquement le CEO d'Ai For Alpha.",
-      "Uniquement le payeur de la première facture."
+      "L'entité cliente et le CEO d'Ai For Alpha.",
+      "Le payeur de la première facture et les contacts commerciaux."
     ],
     answer: 1,
-    explanation: "Le périmètre du screening doit être adapté et documenté."
+    explanation: "Le périmètre du screening doit couvrir les noms qui peuvent porter le risque : entité, noms commerciaux, signataires, représentants, dirigeants pertinents et bénéficiaires effectifs lorsque requis."
   },
   {
     id: "q-screening-2",
@@ -372,7 +372,7 @@ const questionBank = [
       "Continuer sans conclusion."
     ],
     answer: 1,
-    explanation: "Un faux positif est levé par une analyse courte et conservée."
+    explanation: "Un faux positif peut être levé, mais seulement par une analyse courte et conservée qui rattache les éléments distinctifs à la personne contrôlée."
   },
   {
     id: "q-screening-3",
@@ -387,21 +387,21 @@ const questionBank = [
       "Changer l'orthographe du nom dans le dossier."
     ],
     answer: 1,
-    explanation: "Un match non résolu ou doute sérieux impose suspension et escalade."
+    explanation: "Un match non résolu ou un doute sérieux impose de suspendre l'entrée en relation ou l'accès opérationnel et d'escalader à la direction/conformité."
   },
   {
     id: "q-screening-4",
     module: "screening",
     difficulty: "Expert",
     roles: ["client", "compliance"],
-    prompt: "Quelle preuve de screening est insuffisante en cas de contrôle ?",
+    prompt: "Après un screening sans alerte, quelle trace est suffisante pour être défendable en contrôle ?",
     choices: [
-      "Date, source, périmètre des noms contrôlés, résultat et conclusion.",
-      "Capture ou export de l'outil avec conclusion conservée.",
-      "Mention orale 'screening OK' sans date, source ni périmètre.",
-      "Note de faux positif documentée."
+      "Une mention orale 'screening OK' si le client est connu.",
+      "Date, source ou outil, périmètre des noms contrôlés, résultat et conclusion conservée.",
+      "Une capture d'écran isolée sans conclusion, car elle prouve qu'une recherche a été faite.",
+      "Une note rédigée plus tard sans date de contrôle ni liste des noms contrôlés."
     ],
-    answer: 2,
+    answer: 1,
     explanation: "La procédure exige une preuve traçable : date, source/outil, périmètre, résultat et conclusion."
   },
   {
@@ -412,9 +412,9 @@ const questionBank = [
     prompt: "Quelle règle s'applique au paiement des honoraires Ai For Alpha ?",
     choices: [
       "Le paiement doit provenir du client contractant ou d'une entité du même groupe justifiée.",
-      "Tout tiers peut payer si la facture est réglée.",
-      "Les espèces sont acceptées avec une note interne.",
-      "Les crypto-actifs sont acceptés dans le cadre ordinaire."
+      "Un tiers peut payer si son lien avec le client est expliqué après encaissement.",
+      "Une entité du groupe peut payer sans justification dès lors que le libellé mentionne le client.",
+      "Le contrat peut être ajusté après réception pour correspondre au payeur réel."
     ],
     answer: 0,
     explanation: "La cohérence facture, contrat, payeur, banque, pays, devise et montant est centrale."
@@ -441,10 +441,10 @@ const questionBank = [
     roles: ["partner", "client"],
     prompt: "Un apporteur propose de collecter un acompte auprès du prospect pour accélérer le dossier. Quelle réponse est conforme ?",
     choices: [
-      "Accepter si l'apporteur reverse immédiatement les fonds.",
+      "Accepter si l'apporteur reverse immédiatement les fonds depuis son compte professionnel.",
       "Refuser : les apporteurs ne collectent pas de fonds.",
-      "Accepter si le prospect est professionnel.",
-      "Demander un paiement en crypto-actifs."
+      "Limiter la collecte par l'apporteur au seul acompte de démarrage.",
+      "Faire apparaître l'apporteur comme payeur au contrat sans analyse complémentaire."
     ],
     answer: 1,
     explanation: "Les représentants commerciaux/apporteurs ne collectent pas de fonds et remontent toute anomalie."
@@ -471,10 +471,10 @@ const questionBank = [
     roles: ["all", "client", "research", "partner", "compliance"],
     prompt: "Qui doit remonter une anomalie LCB-FT ?",
     choices: [
-      "Uniquement la direction.",
+      "Les équipes commerciales client-facing, car elles portent la relation.",
       "Tout collaborateur ou représentant qui identifie une anomalie.",
-      "Uniquement le client.",
-      "Uniquement l'expert-comptable."
+      "La conformité seulement une fois le dossier complet.",
+      "Le signataire du contrat, car il représente juridiquement le client."
     ],
     answer: 1,
     explanation: "La procédure impose une remontée immédiate à la fonction conformité/direction."
@@ -484,15 +484,15 @@ const questionBank = [
     module: "escalation",
     difficulty: "Scénario",
     roles: ["all", "client", "research", "partner", "compliance"],
-    prompt: "Une analyse de soupçon est en cours. Quelle action est interdite ?",
+    prompt: "Une analyse de soupçon est en cours. Quelle conduite respecte la procédure ?",
     choices: [
-      "Documenter les faits.",
-      "Informer le client qu'une analyse ou déclaration éventuelle est en cours.",
-      "Suspendre l'ouverture d'accès supplémentaire.",
-      "Escalader à la conformité/direction."
+      "Informer le client qu'une analyse est en cours pour obtenir son explication.",
+      "Documenter les faits, escalader à la conformité/direction, maintenir la confidentialité et suspendre tout accès supplémentaire si nécessaire.",
+      "Continuer la relation normalement tant qu'aucune déclaration TRACFIN n'a été faite.",
+      "Supprimer les échanges sensibles pour éviter de conserver des données inutiles."
     ],
     answer: 1,
-    explanation: "La confidentialité des analyses de soupçon et déclarations éventuelles est obligatoire."
+    explanation: "La confidentialité des analyses de soupçon et déclarations éventuelles est obligatoire, mais elle n'empêche pas de documenter, escalader et suspendre si nécessaire."
   },
   {
     id: "q-escalation-3",
@@ -507,7 +507,7 @@ const questionBank = [
       "Transfert de la décision à l'apporteur."
     ],
     answer: 1,
-    explanation: "La procédure prévoit plusieurs issues, à documenter selon les faits."
+    explanation: "La procédure prévoit plusieurs issues graduées selon les faits : poursuivre, renforcer, suspendre, attendre des pièces, refuser ou mettre fin à la relation, avec décision documentée."
   },
   {
     id: "q-escalation-4",
@@ -517,9 +517,9 @@ const questionBank = [
     prompt: "Quelles preuves doivent être conservées pour le déclarant/correspondant TRACFIN ?",
     choices: [
       "Décision de désignation, communication aux autorités, accusé ERMES ou équivalent, continuité/remplacement.",
-      "Uniquement le nom de la personne dans l'organigramme.",
-      "Aucune preuve nominative.",
-      "Le nom du dernier prospect refusé."
+      "Le nom dans l'organigramme et un email interne, sans trace de communication aux autorités.",
+      "L'accusé ERMES uniquement, sans décision de désignation ni continuité/remplacement.",
+      "Une note dans le registre des prospects refusés, sans registre ou note séparée de désignation."
     ],
     answer: 0,
     explanation: "La procédure prévoit un registre ou une note interne séparée pour ces preuves."
@@ -532,9 +532,9 @@ const questionBank = [
     prompt: "Quelles preuves de formation doivent être conservées ?",
     choices: [
       "Supports, feuilles de présence, attestations ou QCM.",
-      "Uniquement une invitation calendrier.",
-      "Aucune preuve si la formation est courte.",
-      "Un email générique sans liste de participants."
+      "L'invitation calendrier et le support, sans preuve des participants formés.",
+      "Une attestation globale sans noms, date, périmètre ni support associé.",
+      "La liste de diffusion d'un email, sans preuve de présence, attestation ou QCM."
     ],
     answer: 0,
     explanation: "La procédure exige la conservation des supports, présences, attestations ou QCM."
@@ -547,9 +547,9 @@ const questionBank = [
     prompt: "Quelle fréquence de revue est prévue pour une relation faible risque active ?",
     choices: [
       "À l'occasion d'un renouvellement, d'un changement significatif ou au plus tard tous les 36 mois.",
-      "Tous les mois.",
-      "Jamais après l'onboarding.",
-      "Tous les 10 ans uniquement."
+      "Tous les 24 mois, comme une relation modérée.",
+      "Uniquement en cas d'alerte sanctions/PEP, sans échéance maximale.",
+      "Au renouvellement contractuel seulement, même si la relation reste active plus de 36 mois."
     ],
     answer: 0,
     explanation: "La procédure prévoit 36 mois au plus tard pour le faible risque, hors déclencheur d'alerte."
@@ -563,8 +563,8 @@ const questionBank = [
     choices: [
       "Revue annuelle minimum et validation direction avant poursuite, extension ou renouvellement.",
       "Tous les 36 mois.",
-      "Uniquement à la demande du client.",
-      "Aucune revue si les paiements sont réguliers."
+      "À la prochaine revue contractuelle si aucune nouvelle facture n'est émise.",
+      "Après validation initiale seulement, si les paiements restent cohérents."
     ],
     answer: 0,
     explanation: "Le risque élevé impose une revue annuelle minimum et une validation direction."
@@ -577,14 +577,52 @@ const questionBank = [
     prompt: "Quand la procédure LCB-FT doit-elle être revue ?",
     choices: [
       "Au moins annuellement et sans délai en cas d'évolution significative.",
-      "Tous les cinq ans uniquement.",
-      "Seulement après une sanction.",
-      "Jamais si aucun incident n'est constaté."
+      "Tous les trois ans, sauf incident majeur.",
+      "À la revue annuelle seulement, même en cas d'évolution réglementaire significative.",
+      "Après un incident uniquement, sans revue périodique planifiée."
     ],
     answer: 0,
     explanation: "Les évolutions doivent être datées, validées et conservées dans l'historique documentaire."
   }
 ];
+
+const moduleCourseNotes = {
+  model: {
+    rule: "Toujours partir du modèle réel d'Ai For Alpha : B2B institutionnel, sans exécution d'ordres, sans custody et sans maniement de fonds clients.",
+    correct: "Cette réponse respecte le périmètre LCB-FT applicable à Ai For Alpha et évite de créer une obligation opérationnelle qui ne correspond pas à l'activité.",
+    fallback: "Cette option confond le dispositif Ai For Alpha avec un parcours de banque dépositaire, de gestion de portefeuille ou de conseil retail."
+  },
+  onboarding: {
+    rule: "Le verrou opérationnel est simple : pas d'accès portail/API, pas de flux et pas de recherche réservée tant que le dossier minimum n'est pas validé.",
+    correct: "Cette réponse protège l'entrée en relation : elle relie l'accès opérationnel à une validation KYC/LCB-FT préalable et traçable.",
+    fallback: "Cette option ouvre ou régularise la relation trop tôt. La procédure exige une validation avant l'accès, pas une correction après coup."
+  },
+  ubo: {
+    rule: "L'analyse des bénéficiaires effectifs est proportionnée : conclusion documentée pour les grands institutionnels transparents, diligences renforcées pour les structures privées ou opaques.",
+    correct: "Cette réponse applique l'approche par les risques : documenter ce qui est pertinent et demander plus lorsque la structure crée un doute.",
+    fallback: "Cette option est soit trop lourde pour un institutionnel transparent, soit trop légère face à une structure opaque."
+  },
+  risk: {
+    rule: "La classification faible, modéré ou élevé doit déclencher des diligences concrètes : pièces, validation, revue, suspension ou refus selon le cas.",
+    correct: "Cette réponse relie les facteurs de risque à une décision opérationnelle traçable.",
+    fallback: "Cette option réduit la cartographie à une formalité ou ignore un facteur de risque qui doit modifier les diligences."
+  },
+  screening: {
+    rule: "Le screening doit être fait avant l'entrée en relation, sur le bon périmètre de noms, avec preuve datée, source, résultat et conclusion.",
+    correct: "Cette réponse conserve la preuve du contrôle et traite correctement les alertes ou faux positifs.",
+    fallback: "Cette option fragilise la preuve du contrôle ou contourne l'escalade attendue en cas de doute."
+  },
+  payments: {
+    rule: "Ai For Alpha ne vérifie pas les fonds investis par les clients, mais contrôle strictement la cohérence des paiements de ses honoraires.",
+    correct: "Cette réponse distingue bien les fonds clients hors périmètre et les paiements d'honoraires qui doivent être cohérents.",
+    fallback: "Cette option accepte un flux de paiement incohérent ou confond le contrôle des honoraires avec la source des fonds investis."
+  },
+  escalation: {
+    rule: "Toute anomalie doit être remontée sans délai, documentée, traitée confidentiellement et conservée dans les registres appropriés.",
+    correct: "Cette réponse protège la confidentialité, la traçabilité et la décision de la direction/conformité.",
+    fallback: "Cette option casse la chaîne d'escalade, manque de preuve ou risque d'informer le client d'une analyse sensible."
+  }
+};
 
 const stateDefaults = {
   role: "all",
@@ -984,25 +1022,153 @@ function renderQuestion() {
       if (index === question.answer) cls = " is-correct";
       if (index === answerRecord.answer && index !== question.answer) cls = " is-wrong";
     }
+    const lesson = answerRecord ? buildChoiceLesson(question, choice, index) : "";
     return `
       <button class="answer${cls}" type="button" data-answer="${index}">
         <span class="answer-letter">${String.fromCharCode(65 + index)}</span>
-        <span>${escapeHtml(choice)}</span>
+        <span class="answer-copy">
+          <span>${escapeHtml(choice)}</span>
+          ${lesson ? `<span class="answer-lesson">${escapeHtml(lesson)}</span>` : ""}
+        </span>
       </button>
     `;
   }).join("");
 
   if (answerRecord) {
-    els.explanation.textContent = question.explanation;
+    els.explanation.innerHTML = buildCourseCorrection(question, answerRecord);
     els.explanation.classList.add("is-visible");
     els.nextQuestionBtn.disabled = false;
     els.nextQuestionBtn.textContent = state.quizIndex === state.quizOrder.length - 1 ? "Terminer le QCM" : "Question suivante";
   } else {
-    els.explanation.textContent = "";
+    els.explanation.innerHTML = "";
     els.explanation.classList.remove("is-visible");
     els.nextQuestionBtn.disabled = true;
     els.nextQuestionBtn.textContent = "Question suivante";
   }
+}
+
+function buildCourseCorrection(question, answerRecord) {
+  const notes = moduleCourseNotes[question.module] || moduleCourseNotes.model;
+  const selectedLetter = String.fromCharCode(65 + answerRecord.answer);
+  const correctLetter = String.fromCharCode(65 + question.answer);
+  const status = answerRecord.correct ? "Réponse correcte" : "Réponse à corriger";
+  const statusClass = answerRecord.correct ? "is-ok" : "is-ko";
+
+  return `
+    <div class="course-correction">
+      <div class="course-status ${statusClass}">
+        <strong>${status}</strong>
+        <span>Votre réponse : ${selectedLetter} · Réponse attendue : ${correctLetter}</span>
+      </div>
+      <div class="course-block">
+        <strong>Pourquoi la bonne réponse est la bonne</strong>
+        <p>${escapeHtml(question.explanation)}</p>
+      </div>
+      <div class="course-block">
+        <strong>Règle à retenir</strong>
+        <p>${escapeHtml(notes.rule)}</p>
+      </div>
+      <div class="course-block">
+        <strong>Réflexe opérationnel</strong>
+        <p>${escapeHtml(notes.correct)}</p>
+      </div>
+    </div>
+  `;
+}
+
+function buildChoiceLesson(question, choice, index) {
+  if (index === question.answer) {
+    return `Bonne réponse : ${correctChoiceReason(question)}`;
+  }
+  return `Mauvaise réponse : ${wrongChoiceReason(choice, question)}`;
+}
+
+function correctChoiceReason(question) {
+  const notes = moduleCourseNotes[question.module] || moduleCourseNotes.model;
+  return notes.correct;
+}
+
+function wrongChoiceReason(choice, question) {
+  const text = normalizeForLesson(choice);
+  const notes = moduleCourseNotes[question.module] || moduleCourseNotes.model;
+
+  if (text.includes("montant est faible")) return "le montant ne transforme jamais une règle interdite en pratique acceptable ; une anomalie reste une anomalie même sur un petit montant.";
+  if (text.includes("prospect est regule") || text.includes("client est regule")) return "un statut régulé peut réduire le risque, mais il ne dispense pas de respecter le périmètre, le screening et la validation préalable.";
+  if (text.includes("tous les investissements")) return "Ai For Alpha ne reconstitue pas l'ensemble des investissements des clients : la vigilance porte sur la relation, les contreparties, le screening et les honoraires encaissés.";
+  if (text.includes("simple clause contractuelle")) return "une clause contractuelle peut soutenir le dossier, mais elle ne remplace ni l'identification, ni le screening, ni la décision documentée.";
+  if (text.includes("declaration orale") || text.includes("oral")) return "une déclaration orale ne remplace pas une preuve conservée ; le dispositif doit être vérifiable en contrôle.";
+  if (text.includes("reconstituer toute la chaine") || text.includes("chaque actionnaire")) return "cette approche est disproportionnée pour un grand institutionnel transparent sans alerte ; la procédure demande une conclusion raisonnable documentée.";
+  if (text.includes("ne rien documenter") || text.includes("aucun screening") || text.includes("aucune preuve")) return "l'absence de trace est un manquement en soi : la conformité doit pouvoir démontrer ce qui a été contrôlé et décidé.";
+  if (text.includes("classer automatiquement")) return "la procédure repose sur une analyse des facteurs de risque ; un automatisme non justifié ne remplace pas la classification documentée.";
+  if (text.includes("ignorer") || text.includes("hors perimetre")) return "un sujet peut rester dans le périmètre LCB-FT même si Ai For Alpha ne gère pas les portefeuilles ; la contrepartie et la relation doivent être comprises.";
+  if (text.includes("contrat est en discussion")) return "une discussion contractuelle ne vaut pas validation LCB-FT ; l'accès opérationnel attend le dossier minimum validé.";
+  if (text.includes("ouvrir") && (text.includes("temporaire") || text.includes("regulier") || text.includes("avant"))) return "ouvrir d'abord et régulariser ensuite inverse le contrôle ; l'accès vient après validation du dossier minimum.";
+  if (text.includes("carte de visite")) return "une carte de visite ne qualifie pas la relation, ne prouve pas le pouvoir de signature et ne remplace pas le circuit onboarding/conformité.";
+  if (text.includes("premier paiement")) return "le paiement ne valide pas le dossier LCB-FT ; il peut lui-même créer une alerte si le payeur est incohérent.";
+  if (text.includes("apporteur confirme") || text.includes("deleguer") || text.includes("decision a l'apporteur")) return "un apporteur peut contribuer à la relation commerciale, mais Ai For Alpha reste responsable de ses obligations et de sa décision.";
+  if (text.includes("aucun point specifique") && text.includes("institutionnel")) return "le caractère institutionnel ne dispense pas de qualifier le service, le canal, les pays, l'apporteur et le payeur attendu.";
+  if (text.includes("completer le reste apres signature")) return "compléter après signature revient à ouvrir la relation avant d'avoir qualifié les risques essentiels : service, canal, pays, apporteur, payeur et cross-border.";
+  if (text.includes("canal de diffusion") && text.includes("l'apporteur prend en charge")) return "l'apporteur ne prend pas en charge les obligations LCB-FT d'Ai For Alpha ; son rôle doit lui-même être qualifié.";
+  if (text.includes("statut institutionnel") && text.includes("cross-border")) return "un statut institutionnel aide l'analyse, mais il ne neutralise pas à lui seul une relation à distance et transfrontalière.";
+  if (text.includes("uniquement le montant") || text.includes("uniquement le nom") || text.includes("uniquement le ceo") || text.includes("uniquement le payeur")) return "cette option réduit trop le périmètre du contrôle ; la procédure exige plusieurs dimensions et plusieurs noms selon le risque.";
+  if (text.includes("signataire principal seulement") || text.includes("entite cliente et le ceo") || text.includes("payeur de la premiere facture")) return "le screening doit couvrir les noms porteurs du risque, pas seulement un contact, le payeur ou une personne interne à Ai For Alpha.";
+  if (text.includes("site web uniquement") || text.includes("signataire uniquement")) return "un site web ou un signataire ne suffit pas à identifier une personne morale ; il faut documenter l'entité elle-même et la qualité des représentants.";
+  if (text.includes("domaine personnel est connu")) return "un domaine email personnel connu ne prouve pas la fonction, l'habilitation ni la cohérence avec l'entité cliente.";
+  if (text.includes("remplacer le signataire par l'apporteur")) return "l'apporteur ne remplace pas un représentant habilité du client ; la qualité de signature doit rester cohérente et documentée.";
+  if (text.includes("mot de passe") || text.includes("preferences personnelles")) return "cette information est inutile, intrusive ou hors finalité LCB-FT ; les données collectées doivent être pertinentes et proportionnées.";
+  if (text.includes("acces temporaire") || text.includes("envoyer") || text.includes("email personnel")) return "transmettre des contenus ou accès hors circuit validé contourne le verrou d'onboarding et crée une faille de traçabilité.";
+  if (text.includes("corriger apres") || text.includes("prochain trimestre") || text.includes("revue annuelle")) return "la revue périodique ne sert pas à réparer un onboarding incomplet ; les points bloquants doivent être traités avant l'accès ou la poursuite.";
+  if (text.includes("facture payee")) return "un paiement ne prouve pas à lui seul l'identité ni la cohérence LCB-FT du client ; il peut même être un signal d'alerte si le payeur est incohérent.";
+  if (text.includes("vigilance faible")) return "une structure opaque qui refuse les documents ne peut pas rester en vigilance faible ; le doute doit être escaladé.";
+  if (text.includes("tous les beneficiaires du regime") || text.includes("patrimoine de chaque adherent")) return "pour un fonds de pension ou organisme public, demander chaque bénéficiaire ou adhérent serait disproportionné ; il faut documenter l'entité, le régime et la supervision.";
+  if (text.includes("statut public") && text.includes("sans identifier les signataires")) return "le statut public ou assimilé ne dispense pas d'identifier les signataires et la supervision ou tutelle.";
+  if (text.includes("prix, duree") || text.includes("nom, prenom") || text.includes("montant facture")) return "cette liste mélange des informations utiles avec des éléments qui ne couvrent pas les six dimensions de risque prévues par la cartographie.";
+  if (text.includes("pays standard") || text.includes("institution publique") || text.includes("renouvellement sans changement")) return "ce cas ne cumule pas les signaux critiques ; le risque élevé vient surtout de l'opacité, de la géographie sensible, du tiers payeur et de la pression.";
+  if (text.includes("envoyee au client")) return "la classification est un outil interne de vigilance, pas une information à communiquer au client.";
+  if (text.includes("remplace tous les screenings")) return "la classification oriente les diligences, mais elle ne remplace pas le screening sanctions/gel/PEP.";
+  if (text.includes("fixer le prix")) return "le prix n'est pas l'objectif de la classification LCB-FT ; elle sert à décider les diligences et validations.";
+  if (text.includes("toujours faible") || text.includes("toujours eleve") || text.includes("faible sans autre analyse") || text.includes("eleve par defaut")) return "la qualification doit rester proportionnée : un client institutionnel peut réduire le risque, mais le cross-border et la distance doivent être documentés avant conclusion.";
+  if (text.includes("supprimer") || text.includes("changer l'orthographe")) return "effacer ou altérer un signal détruit la preuve ; il faut analyser, documenter et escalader si le doute persiste.";
+  if (text.includes("capture") && text.includes("sans conclusion")) return "une capture peut être utile, mais sans conclusion et sans périmètre elle ne démontre pas que le contrôle a été correctement analysé.";
+  if (text.includes("plus tard") && text.includes("sans date")) return "une trace reconstituée sans date de contrôle ni noms contrôlés ne permet pas de prouver ce qui a été vérifié au moment utile.";
+  if (text.includes("continuer sans conclusion")) return "un résultat ne doit pas rester sans conclusion : il faut décider, documenter et conserver la raison de levée ou d'escalade.";
+  if (text.includes("bloquer la facturation")) return "le risque porte sur l'entrée en relation et l'accès opérationnel, pas seulement sur la facturation ; un match non levé impose suspension et escalade.";
+  if (text.includes("demander au prospect") || text.includes("demander au client s'il")) return "interroger directement le client sur une alerte sensible peut être inadapté et risquer de révéler l'analyse ; il faut passer par conformité/direction.";
+  if (text.includes("informer le client")) return "informer le client d'une analyse de soupçon ou d'une déclaration éventuelle viole la confidentialité attendue.";
+  if (text.includes("continuer la relation normalement")) return "l'absence de déclaration formelle à ce stade ne permet pas d'ignorer l'alerte ; il faut gérer le risque pendant l'analyse.";
+  if (text.includes("apres encaissement")) return "la justification du payeur doit être analysée avant acceptation ; encaisser d'abord crée un risque de régularisation a posteriori.";
+  if (text.includes("sans justification") && text.includes("groupe")) return "une entité du même groupe peut être cohérente, mais le lien et la raison du paiement doivent être justifiés et conservés.";
+  if (text.includes("accepter") && (text.includes("tiers") || text.includes("n'importe quel") || text.includes("especes") || text.includes("crypto") || text.includes("montant correspond"))) return "l'encaissement ne doit pas primer sur la cohérence du payeur ; espèces, crypto ordinaires et tiers inexpliqués sont interdits ou à escalader.";
+  if (text.includes("modifier le contrat") || text.includes("ajuste") || text.includes("autre compte")) return "adapter les documents pour faire disparaître l'anomalie n'est pas une analyse LCB-FT ; il faut comprendre et justifier le flux réel.";
+  if (text.includes("apporteur reverse") || text.includes("seul acompte") || text.includes("collecte par l'apporteur")) return "le problème n'est pas seulement le montant ou la rapidité de reversement : un apporteur ne doit pas collecter les fonds du prospect.";
+  if (text.includes("apporteur comme payeur")) return "nommer l'apporteur payeur au contrat ne justifie pas le flux ; cela masque l'anomalie au lieu de l'analyser.";
+  if (text.includes("partenaire de recevoir")) return "faire recevoir les fonds par un partenaire déplace l'anomalie sans la résoudre ; le flux d'honoraires doit rester cohérent avec le client contractant.";
+  if (text.includes("source des fonds investis")) return "Ai For Alpha ne reçoit ni ne gère ces fonds ; le contrôle pertinent porte sur le client, la relation et le paiement des honoraires.";
+  if (text.includes("aucun paiement")) return "même sans custody, Ai For Alpha doit contrôler la cohérence des honoraires qu'elle encaisse.";
+  if (text.includes("uniquement la direction") || text.includes("uniquement le client") || text.includes("uniquement l'expert") || text.includes("uniquement les equipes commerciales") || text.includes("uniquement la conformite") || text.includes("uniquement le signataire") || text.includes("equipes commerciales client-facing") || text.includes("conformite seulement") || text.includes("signataire du contrat")) return "la remontée des anomalies est l'affaire de toute personne exposée à un signal, pas seulement d'une fonction unique.";
+  if (text.includes("uniquement poursuivre")) return "la direction doit pouvoir choisir une réponse proportionnée : poursuite, mesures renforcées, suspension, refus ou fin de relation.";
+  if (text.includes("declaration automatique")) return "une déclaration TRACFIN suppose une analyse documentée ; toute alerte ne devient pas mécaniquement une déclaration.";
+  if (text.includes("organigramme") && text.includes("sans trace")) return "l'organigramme ne prouve pas la désignation réglementaire ni sa communication ; il faut conserver les preuves de désignation et de continuité.";
+  if (text.includes("accuse ermes uniquement")) return "l'accusé ERMES peut être une preuve utile, mais il ne remplace pas la décision de désignation ni la trace de continuité/remplacement.";
+  if (text.includes("prospects refuses")) return "les preuves de désignation TRACFIN doivent rester identifiables dans un registre ou une note séparée, pas noyées dans un registre commercial.";
+  if (text.includes("sans preuve des participants") || text.includes("sans noms") || text.includes("liste de diffusion")) return "la formation doit être prouvable : contenu, personnes formées, date, attestation ou score QCM doivent permettre un contrôle.";
+  if (text.includes("tous les 24 mois")) return "24 mois correspond à une périodicité plus rapprochée utilisée pour un niveau de risque supérieur ; pour le faible risque, la limite maximale est 36 mois hors déclencheur.";
+  if (text.includes("sans echeance maximale")) return "une alerte sanctions/PEP déclenche une revue immédiate, mais elle ne supprime pas l'obligation d'avoir une échéance maximale de revue.";
+  if (text.includes("renouvellement contractuel seulement")) return "le renouvellement est bien un déclencheur, mais il n'est pas le seul : un changement significatif ou le seuil maximal de 36 mois imposent aussi une revue.";
+  if (text.includes("tous les 36 mois")) return "36 mois correspond au plafond faible risque ; une relation en risque élevé demande une revue annuelle minimum et une validation direction.";
+  if (text.includes("prochaine revue contractuelle") || text.includes("validation initiale seulement")) return "un risque élevé impose une revue annuelle minimum et une validation direction ; la cohérence des paiements ou l'absence de nouvelle facture ne suffit pas.";
+  if (text.includes("tous les trois ans") || text.includes("revue annuelle seulement") || text.includes("incident uniquement")) return "la procédure doit être revue au moins annuellement et immédiatement si une évolution significative intervient.";
+  if (text.includes("tous les mois") || text.includes("tous les 10 ans") || text.includes("jamais") || text.includes("cinq ans")) return "la fréquence doit suivre le niveau de risque et les déclencheurs prévus par la procédure.";
+  if (text.includes("invitation calendrier") || text.includes("email generique")) return "ces éléments peuvent aider, mais ils ne prouvent pas seuls le contenu, la présence, le score ou l'appropriation.";
+
+  return notes.fallback;
+}
+
+function normalizeForLesson(value) {
+  return String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
 }
 
 function submitAnswer(answer) {
