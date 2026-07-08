@@ -761,7 +761,7 @@ const moduleCourseNotes = {
 };
 
 const APP_STORAGE_VERSION = 5;
-const APP_BUILD = "2026-07-08-certificate-pdf";
+const APP_BUILD = "2026-07-08-pdf-fallback";
 const STORAGE_PREFIX = "afa-lcbft-training";
 const LEGACY_STATE_PREFIXES = [
   "afa-lcbft-training-v3:",
