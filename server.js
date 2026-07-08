@@ -193,6 +193,70 @@ function mergeModuleTimes(...sources) {
   return result;
 }
 
+function safeNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function dateMs(value) {
+  const parsed = Date.parse(value || "");
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function progressQuality(progress) {
+  const result = progress?.result || {};
+  return {
+    completedAtMs: dateMs(result.completedAt),
+    trainingPassed: Boolean(result.trainingPassed || result.passed),
+    qcmPassed: Boolean(result.qcmPassed || result.passed),
+    modulesComplete: Boolean(result.modulesComplete || safeNumber(result.modulesRead) >= safeNumber(result.totalModules || 7)),
+    score: safeNumber(result.score),
+    correct: safeNumber(result.correct),
+    answered: safeNumber(result.answered),
+    modulesRead: safeNumber(result.modulesRead)
+  };
+}
+
+function shouldReplaceLatestProgress(existingProgress, incomingProgress) {
+  if (!existingProgress) return true;
+  const existing = progressQuality(existingProgress);
+  const incoming = progressQuality(incomingProgress);
+
+  if (incoming.completedAtMs > existing.completedAtMs + 1000) return true;
+  if (existing.completedAtMs > incoming.completedAtMs + 1000) {
+    if (
+      existing.trainingPassed
+      && incoming.trainingPassed
+      && existing.answered >= incoming.answered
+      && existing.modulesRead >= incoming.modulesRead
+      && existing.correct >= incoming.correct
+    ) {
+      return false;
+    }
+  }
+
+  if (incoming.trainingPassed && !existing.trainingPassed) return true;
+  if (!incoming.trainingPassed && existing.trainingPassed && incoming.answered <= existing.answered && incoming.modulesRead <= existing.modulesRead) return false;
+  if (incoming.answered > existing.answered) return true;
+  if (incoming.modulesRead > existing.modulesRead && incoming.answered >= existing.answered) return true;
+  if (incoming.answered >= existing.answered && incoming.modulesRead >= existing.modulesRead && incoming.correct > existing.correct) return true;
+  if (existing.answered >= incoming.answered && existing.modulesRead >= incoming.modulesRead && existing.correct > incoming.correct) return false;
+  return true;
+}
+
+function shouldStoreAttempt(attempts, incomingAttempt) {
+  const incomingCompletedMs = dateMs(incomingAttempt.completedAt);
+  return !attempts.some(existing => {
+    const existingCompletedMs = dateMs(existing.completedAt);
+    return existingCompletedMs > incomingCompletedMs + 1000
+      && Boolean(existing.passed)
+      && Boolean(incomingAttempt.passed)
+      && safeNumber(existing.correct) >= safeNumber(incomingAttempt.correct)
+      && safeNumber(existing.answered) >= safeNumber(incomingAttempt.answered)
+      && safeNumber(existing.modulesRead) >= safeNumber(incomingAttempt.modulesRead);
+  });
+}
+
 async function handleApi(req, res, url) {
   if (req.method === "POST" && url.pathname === "/api/login") {
     const body = await parseBody(req);
@@ -262,7 +326,7 @@ async function handleApi(req, res, url) {
       Number(body.longRecord?.totalTimeMs || 0)
     );
     user.moduleTimeMs = mergeModuleTimes(user.moduleTimeMs, body.result?.moduleTimeMs, body.longRecord?.moduleTimeMs);
-    user.latestProgress = {
+    const incomingProgress = {
       savedAt: now,
       reason: body.reason || null,
       role: body.learner?.role || null,
@@ -273,12 +337,17 @@ async function handleApi(req, res, url) {
       readModules: body.readModules || [],
       answers: body.answers || []
     };
+    const latestProgressAccepted = shouldReplaceLatestProgress(user.latestProgress, incomingProgress);
+    if (latestProgressAccepted) {
+      user.latestProgress = incomingProgress;
+    }
     user.events = user.events || [];
     user.events.push({
       type: "progress",
       at: now,
       sessionId,
       reason: body.reason || null,
+      accepted: latestProgressAccepted,
       score: body.result?.score ?? null,
       correct: body.result?.correct ?? null,
       answered: body.result?.answered ?? null,
@@ -291,6 +360,7 @@ async function handleApi(req, res, url) {
       email,
       sessionId,
       reason: body.reason || null,
+      accepted: latestProgressAccepted,
       score: body.result?.score ?? null,
       correct: body.result?.correct ?? null,
       answered: body.result?.answered ?? null,
@@ -304,7 +374,7 @@ async function handleApi(req, res, url) {
       const attemptId = body.longRecord?.latestSnapshot?.attemptId || body.answers?.[0]?.attemptId || `${sessionId}:${body.result.completedAt}`;
       const exists = user.attempts.some(attempt => attempt.completedAt === body.result.completedAt || attempt.attemptId === attemptId);
       if (!exists) {
-        user.attempts.push({
+        const incomingAttempt = {
           attemptId,
           completedAt: body.result.completedAt,
           savedAt: now,
@@ -320,13 +390,33 @@ async function handleApi(req, res, url) {
           timeSpentMs: body.result.timeSpentMs || null,
           attemptTimeMs: body.result.attemptTimeMs || null,
           answers: body.answers || []
-        });
+        };
+        if (shouldStoreAttempt(user.attempts, incomingAttempt)) {
+          user.attempts.push(incomingAttempt);
+        }
         user.attempts = user.attempts.slice(-MAX_SERVER_ATTEMPTS);
       }
     }
 
     writeData(data);
     sendJson(res, 200, { ok: true, user: sanitizePublicUser(user) });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/user") {
+    const email = url.searchParams.get("email");
+    const sessionId = url.searchParams.get("sessionId");
+    const data = readData();
+    const user = findUserRecord(data, email);
+
+    if (!user || !isValidSession(user, sessionId)) {
+      sendJson(res, 403, { error: "invalid_session" });
+      return;
+    }
+
+    touchSession(user, sessionId, new Date().toISOString());
+    writeData(data);
+    sendJson(res, 200, { user: sanitizePublicUser(user) });
     return;
   }
 

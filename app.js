@@ -859,7 +859,10 @@ function init() {
   bindEvents();
   bindPersistenceEvents();
   const restored = restoreSession();
-  if (restored) showApp();
+  if (restored) {
+    showApp();
+    hydrateRestoredSessionFromServer();
+  }
 }
 
 function bindEvents() {
@@ -998,6 +1001,24 @@ function restoreSession() {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function hydrateRestoredSessionFromServer() {
+  if (!currentUser?.serverMode || !currentUser.sessionId) return;
+  try {
+    const params = new URLSearchParams({ email: currentUser.email, sessionId: currentUser.sessionId });
+    const data = await apiGet(`/api/user?${params.toString()}`);
+    if (!data?.user) return;
+    hydrateStateFromServer(data.user);
+    applyAssignedRole();
+    ensureQuizOrder();
+    ensureQuestionTimer();
+    saveState("session_server_restored");
+    renderAll();
+    refreshAdmin();
+  } catch {
+    // Keep the local snapshot when the server is temporarily unavailable.
   }
 }
 
@@ -1231,11 +1252,16 @@ function shouldUseServerProgress(progress) {
     || safeNumber(state.timing?.totalMs) > 0;
 
   if (!localHasProgress) return true;
+  if (dateMs(result.completedAt) > dateMs(state.completedAt) + 1000) return true;
+  if (remoteAnswered >= localPass.answered && remoteModules >= state.readModules.length) {
+    if (safeNumber(result.correct) > localPass.correct) return true;
+    if (safeNumber(result.score) > localPass.score) return true;
+  }
   if (remoteSavedMs && localSavedMs && remoteSavedMs > localSavedMs + 1000) return true;
   if (result.completedAt && !state.completedAt) return true;
   if (remoteAnswered > localPass.answered) return true;
   if (remoteModules > state.readModules.length && remoteAnswered >= localPass.answered) return true;
-  if (safeNumber(result.score) > safeNumber(state.stats?.bestScore) && remoteAnswered >= localPass.answered) return true;
+  if (safeNumber(result.score) > Math.max(safeNumber(state.stats?.bestScore), localPass.score) && remoteAnswered >= localPass.answered) return true;
   return false;
 }
 
