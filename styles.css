@@ -245,16 +245,6 @@ p {
   background: rgba(255, 255, 255, 0.12);
 }
 
-.module-button.is-done {
-  background: var(--aifa-orange);
-  color: var(--white);
-}
-
-.module-button.is-done:hover,
-.module-button.is-done.is-active {
-  background: #c87f00;
-}
-
 .module-number {
   width: 28px;
   height: 28px;
@@ -282,7 +272,7 @@ p {
 }
 
 .module-button.is-done .module-status {
-  background: var(--white);
+  background: var(--aifa-gold);
   position: relative;
 }
 
@@ -290,17 +280,12 @@ p {
   content: "";
   width: 8px;
   height: 4px;
-  border-left: 2px solid var(--aifa-orange);
-  border-bottom: 2px solid var(--aifa-orange);
+  border-left: 2px solid var(--aifa-navy);
+  border-bottom: 2px solid var(--aifa-navy);
   transform: rotate(-45deg);
   position: absolute;
   left: 5px;
   top: 5px;
-}
-
-.module-button.is-done .module-number {
-  border-color: rgba(255, 255, 255, 0.62);
-  background: rgba(255, 255, 255, 0.14);
 }
 
 .sidebar-actions {
