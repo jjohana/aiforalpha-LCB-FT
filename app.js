@@ -1839,7 +1839,10 @@ function renderModule() {
   els.moduleAudience.textContent = module.audience;
   els.moduleLead.textContent = module.lead;
   els.modulePoints.innerHTML = module.points.map(point => `<li><span>${escapeHtml(point)}</span></li>`).join("");
-  els.markReadBtn.textContent = state.readModules.includes(module.id) ? "Module lu" : "Marquer le module lu";
+  const moduleIsRead = state.readModules.includes(module.id);
+  els.markReadBtn.textContent = moduleIsRead ? "Module lu" : "Marquer le module lu";
+  els.markReadBtn.classList.toggle("is-read", moduleIsRead);
+  els.markReadBtn.setAttribute("aria-pressed", String(moduleIsRead));
   renderVisual(module.visual);
   renderModuleDeepDive(module.id);
 }

@@ -245,6 +245,15 @@ p {
   background: rgba(255, 255, 255, 0.12);
 }
 
+.module-button.is-done {
+  background: rgba(224, 144, 3, 0.14);
+}
+
+.module-button.is-done:hover,
+.module-button.is-done.is-active {
+  background: rgba(224, 144, 3, 0.22);
+}
+
 .module-number {
   width: 28px;
   height: 28px;
@@ -272,7 +281,7 @@ p {
 }
 
 .module-button.is-done .module-status {
-  background: var(--aifa-gold);
+  background: var(--aifa-orange);
   position: relative;
 }
 
@@ -286,6 +295,10 @@ p {
   position: absolute;
   left: 5px;
   top: 5px;
+}
+
+.module-button.is-done .module-number {
+  border-color: rgba(224, 144, 3, 0.85);
 }
 
 .sidebar-actions {
@@ -786,6 +799,16 @@ p {
 
 .secondary:hover {
   background: var(--paper);
+}
+
+.secondary.is-read {
+  border-color: var(--aifa-orange);
+  background: var(--aifa-orange);
+  color: var(--white);
+}
+
+.secondary.is-read:hover {
+  background: #c87f00;
 }
 
 .primary[disabled],
