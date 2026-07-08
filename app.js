@@ -761,7 +761,7 @@ const moduleCourseNotes = {
 };
 
 const APP_STORAGE_VERSION = 5;
-const APP_BUILD = "2026-07-08-supabase1";
+const APP_BUILD = "2026-07-08-supabase2";
 const DB_CONFIG = window.AFA_DB || {};
 const STORAGE_PREFIX = "afa-lcbft-training";
 const LEGACY_STATE_PREFIXES = [
@@ -966,6 +966,30 @@ function canUseLocalApi() {
   return ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
 }
 
+function persistCurrentSession() {
+  if (!currentUser) return;
+  sessionStorage.setItem("afa-lcbft-session", JSON.stringify(currentUser));
+}
+
+function ensureConfiguredRemoteMode() {
+  if (!currentUser || !isSupabaseConfigured()) return false;
+  let changed = false;
+  if (!currentUser.sessionId) {
+    currentUser.sessionId = createSessionId();
+    changed = true;
+  }
+  if (!currentUser.serverMode) {
+    currentUser.serverMode = true;
+    changed = true;
+  }
+  if (currentUser.remoteLabel !== "supabase") {
+    currentUser.remoteLabel = "supabase";
+    changed = true;
+  }
+  if (changed) persistCurrentSession();
+  return changed;
+}
+
 function renderStorageStatus() {
   if (!els.storageStatus) return;
   const online = isSupabaseConfigured();
@@ -1006,7 +1030,7 @@ async function login(rawEmail) {
   }
 
   currentUser = { ...user, sessionId, serverMode, remoteLabel };
-  sessionStorage.setItem("afa-lcbft-session", JSON.stringify(currentUser));
+  persistCurrentSession();
   loadState();
   hydrateStateFromServer(serverUser);
   applyAssignedRole();
@@ -1030,12 +1054,14 @@ function restoreSession() {
     const parsed = JSON.parse(raw);
     const user = allowedUsers.find(item => item.email === parsed.email);
     if (!user) return false;
+    const supabaseReady = isSupabaseConfigured();
     currentUser = {
       ...user,
-      sessionId: parsed.sessionId,
-      serverMode: parsed.serverMode,
-      remoteLabel: parsed.remoteLabel || (isSupabaseConfigured() ? "supabase" : "server")
+      sessionId: parsed.sessionId || createSessionId(),
+      serverMode: supabaseReady ? true : Boolean(parsed.serverMode),
+      remoteLabel: supabaseReady ? "supabase" : (parsed.remoteLabel || "server")
     };
+    persistCurrentSession();
     loadState();
     applyAssignedRole();
     ensureQuizOrder();
@@ -1048,6 +1074,7 @@ function restoreSession() {
 }
 
 async function hydrateRestoredSessionFromServer() {
+  ensureConfiguredRemoteMode();
   if (!currentUser?.serverMode || !currentUser.sessionId) return;
   try {
     const data = currentUser.remoteLabel === "supabase"
@@ -2306,12 +2333,14 @@ function getCompletionMessage() {
 }
 
 function scheduleSync(reason) {
+  ensureConfiguredRemoteMode();
   if (!currentUser?.serverMode) return;
   window.clearTimeout(syncTimer);
   syncTimer = window.setTimeout(() => syncProgress(reason), 350);
 }
 
 async function syncProgress(reason) {
+  ensureConfiguredRemoteMode();
   if (!currentUser?.serverMode) return;
   const payload = buildProofPayload(reason);
   try {
@@ -2388,6 +2417,7 @@ async function refreshAdmin() {
     return;
   }
   els.adminPanel.classList.remove("is-hidden");
+  ensureConfiguredRemoteMode();
   if (!currentUser.serverMode) {
     renderAdminRows(buildLocalAdminFallback());
     return;
@@ -2478,7 +2508,15 @@ function renderAdminRows(users) {
     const latest = getAdminDisplayResult(user);
     const score = Number.isFinite(latest.score) ? `${latest.score}%` : "-";
     const correct = Number.isFinite(latest.correct) && Number.isFinite(latest.answered) ? `${latest.correct}/${latest.answered}` : "-";
-    const timeSpent = formatDuration(latest.timeSpentMs || user.totalTimeMs || user.longRecord?.totalTimeMs || 0);
+    const currentUserLocalTime = user.email === currentUser?.email
+      ? Math.max(safeNumber(state.timing?.totalMs), safeNumber(longRecord?.totalTimeMs))
+      : 0;
+    const timeSpent = formatDuration(Math.max(
+      safeNumber(latest.timeSpentMs),
+      safeNumber(user.totalTimeMs),
+      safeNumber(user.longRecord?.totalTimeMs),
+      currentUserLocalTime
+    ));
     const modulesText = `${latest.modulesRead || 0}/${latest.totalModules || modules.length}`;
     const status = latest.trainingPassed ? "Validé" : "En cours";
     const lastLogin = user.lastLoginAt ? formatDateTime(user.lastLoginAt) : "-";
@@ -2499,24 +2537,34 @@ function renderAdminRows(users) {
 
 function buildLocalAdminFallback() {
   const pass = getPassStatus();
-  return [{
+  const localUser = {
     email: currentUser.email,
     name: currentUser.name,
-    loginCount: 1,
-    lastLoginAt: new Date().toISOString(),
+    loginCount: Math.max(safeNumber(longRecord?.loginCount), safeNumber(state.stats?.loginCount), 1),
+    lastLoginAt: newestTimestamp(longRecord?.lastLoginAt, state.stats?.lastLoginAt) || new Date().toISOString(),
     latestProgress: {
       result: {
         passed: pass.passed,
+        trainingPassed: pass.trainingPassed,
+        qcmPassed: pass.qcmPassed,
+        modulesComplete: pass.modulesComplete,
         score: pass.score,
         correct: pass.correct,
         answered: pass.answered,
+        totalQuestions: state.quizOrder.length,
         modulesRead: state.readModules.length,
         totalModules: modules.length,
-        timeSpentMs: state.timing?.totalMs || 0
+        completedAt: state.completedAt,
+        timeSpentMs: state.timing?.totalMs || 0,
+        attemptTimeMs: getAttemptTimeMs()
       }
     },
-    totalTimeMs: longRecord?.totalTimeMs || state.timing?.totalMs || 0
-  }];
+    attempts: longRecord?.attempts || [],
+    longRecord: longRecord || null,
+    totalTimeMs: Math.max(safeNumber(longRecord?.totalTimeMs), safeNumber(state.timing?.totalMs))
+  };
+  localUser.latestProgress.result = getAdminDisplayResult(localUser);
+  return [localUser];
 }
 
 function exportCertificatePdf() {
