@@ -761,7 +761,7 @@ const moduleCourseNotes = {
 };
 
 const APP_STORAGE_VERSION = 5;
-const APP_BUILD = "2026-07-08-db";
+const APP_BUILD = "2026-07-08-db2";
 const DB_CONFIG = window.AFA_DB || {};
 const STORAGE_PREFIX = "afa-lcbft-training";
 const LEGACY_STATE_PREFIXES = [
