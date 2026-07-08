@@ -761,7 +761,7 @@ const moduleCourseNotes = {
 };
 
 const APP_STORAGE_VERSION = 5;
-const APP_BUILD = "2026-07-08-required-qcm-path";
+const APP_BUILD = "2026-07-08-certificate-pdf";
 const STORAGE_PREFIX = "afa-lcbft-training";
 const LEGACY_STATE_PREFIXES = [
   "afa-lcbft-training-v3:",
@@ -920,7 +920,7 @@ function bindEvents() {
   });
 
   els.refreshAdminBtn.addEventListener("click", refreshAdmin);
-  els.exportBtn.addEventListener("click", exportProof);
+  els.exportBtn.addEventListener("click", exportCertificatePdf);
   els.printBtn.addEventListener("click", () => window.print());
   els.logoutBtn.addEventListener("click", logout);
 }
@@ -1566,7 +1566,7 @@ function writeJsonStorage(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    showToast("Stockage local saturé : exportez la preuve JSON.");
+    showToast("Stockage local saturé : téléchargez l'attestation PDF.");
   }
 }
 
@@ -2366,20 +2366,221 @@ function buildLocalAdminFallback() {
   }];
 }
 
-function exportProof() {
-  saveState("export", { remote: false });
-  const payload = buildProofPayload("export");
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+function exportCertificatePdf() {
+  saveState("certificate_pdf", { remote: false });
+  const pass = getPassStatus();
+  if (!pass.trainingPassed) {
+    showToast("Attestation PDF disponible après validation complète.");
+    return;
+  }
+
+  const certificate = buildCertificateData(pass);
+  const blob = createCertificatePdfBlob(certificate);
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   const safeName = currentUser.email.split("@")[0].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
   link.href = url;
-  link.download = `preuve-lcbft-${safeName}-${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = `attestation-lcbft-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
-  showToast("Preuve JSON exportée.");
+  showToast("Attestation PDF téléchargée.");
+}
+
+function buildCertificateData(pass = getPassStatus()) {
+  const role = roles.find(item => item.id === state.role)?.label || state.role;
+  const completedAt = state.completedAt || new Date().toISOString();
+  const generatedAt = new Date().toISOString();
+  return {
+    learnerName: currentUser.name,
+    learnerEmail: currentUser.email,
+    role,
+    score: pass.score,
+    correct: pass.correct,
+    answered: pass.answered,
+    totalQuestions: state.quizOrder.length,
+    modulesRead: state.readModules.length,
+    totalModules: modules.length,
+    timeSpent: formatDuration(state.timing?.totalMs || 0),
+    completedAt,
+    completedDate: formatDateTime(completedAt),
+    generatedAt,
+    generatedDate: formatDateTime(generatedAt),
+    sourceDocument: "Procédure LCB-FT Ai For Alpha 2026",
+    sourceDate: "06/07/2026",
+    referenceId: buildCertificateReference(completedAt),
+    modules: modules.map(module => module.title)
+  };
+}
+
+function buildCertificateReference(completedAt) {
+  const datePart = String(completedAt || new Date().toISOString()).slice(0, 10).replace(/-/g, "");
+  const userPart = currentUser.email.split("@")[0].replace(/[^a-z0-9]+/gi, "").slice(0, 12).toUpperCase();
+  const attemptPart = String(state.currentAttemptId || "").replace(/[^a-z0-9]/gi, "").slice(0, 8).toUpperCase();
+  return `AIFA-LCBFT-${datePart}-${userPart}${attemptPart ? `-${attemptPart}` : ""}`;
+}
+
+function createCertificatePdfBlob(certificate) {
+  const width = 842;
+  const height = 595;
+  const content = buildCertificatePdfContent(certificate, width, height);
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${width} ${height}] /Resources << /Font << /F1 4 0 R /F2 5 0 R /F3 6 0 R >> >> /Contents 7 0 R >>`,
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>",
+    `<< /Length ${content.length} >>\nstream\n${content}\nendstream`,
+    `<< /Title (${pdfEscapeText("Attestation LCB-FT Ai For Alpha")}) /Author (${pdfEscapeText("Ai For Alpha")}) /Creator (${pdfEscapeText("Ai For Alpha Training Hub")}) >>`
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  objects.forEach((object, index) => {
+    offsets.push(pdf.length);
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  });
+  const xrefOffset = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (let index = 1; index <= objects.length; index += 1) {
+    pdf += `${String(offsets[index]).padStart(10, "0")} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info 8 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  return new Blob([pdf], { type: "application/pdf" });
+}
+
+function buildCertificatePdfContent(certificate, width, height) {
+  const lines = [];
+  const add = command => lines.push(command);
+  const fill = color => `${pdfRgb(color)} rg`;
+  const stroke = color => `${pdfRgb(color)} RG`;
+  const rect = (x, y, w, h, color) => add(`${fill(color)} ${x} ${y} ${w} ${h} re f`);
+  const strokeRect = (x, y, w, h, color, lineWidth = 1) => add(`${stroke(color)} ${lineWidth} w ${x} ${y} ${w} ${h} re S`);
+  const text = (value, x, y, size, font = "F1", color = "#0D2B42") => {
+    add(`BT ${fill(color)} /${font} ${size} Tf 1 0 0 1 ${x} ${y} Tm (${pdfEscapeText(value)}) Tj ET`);
+  };
+  const wrappedText = (value, x, y, size, maxChars, lineHeight, font = "F1", color = "#0D2B42") => {
+    const wrapped = wrapPdfText(value, maxChars);
+    wrapped.forEach((line, index) => text(line, x, y - index * lineHeight, size, font, color));
+    return y - wrapped.length * lineHeight;
+  };
+
+  rect(0, 0, width, height, "#F3F6F8");
+  rect(0, 500, width, 95, "#0D2B42");
+  rect(42, 526, 54, 42, "#FFFFFF");
+  text("AI", 56, 539, 22, "F2", "#0D2B42");
+  text("For Alpha", 108, 545, 24, "F2", "#FFFFFF");
+  text("LCB-FT Training Hub", 108, 525, 12, "F2", "#EBB75B");
+  text(`Référence : ${certificate.referenceId}`, 520, 548, 9, "F1", "#FFFFFF");
+  text(`Générée le ${certificate.generatedDate}`, 520, 532, 9, "F1", "#FFFFFF");
+
+  rect(50, 60, 742, 410, "#FFFFFF");
+  strokeRect(50, 60, 742, 410, "#D9E2EA", 1);
+  rect(50, 462, 742, 8, "#E09003");
+
+  text("ATTESTATION DE SENSIBILISATION LCB-FT", 184, 432, 22, "F2", "#0D2B42");
+  text("Ai For Alpha atteste que", 338, 405, 11, "F3", "#494949");
+  text(certificate.learnerName, 262, 374, 28, "F2", "#0D2B42");
+  text(certificate.learnerEmail, 301, 352, 12, "F1", "#1B5776");
+
+  wrappedText(
+    `a validé la formation de sensibilisation LCB-FT Ai For Alpha, parcours ${certificate.role}, conformément à la procédure interne ${certificate.sourceDocument}.`,
+    95,
+    318,
+    12,
+    86,
+    16,
+    "F1",
+    "#0D2B42"
+  );
+
+  const cards = [
+    ["Score QCM", `${certificate.score}%`],
+    ["Réponses correctes", `${certificate.correct}/${certificate.answered}`],
+    ["Modules lus", `${certificate.modulesRead}/${certificate.totalModules}`],
+    ["Temps actif", certificate.timeSpent]
+  ];
+  cards.forEach((card, index) => {
+    const x = 80 + index * 178;
+    rect(x, 205, 150, 70, "#F7FAFC");
+    strokeRect(x, 205, 150, 70, "#D9E2EA", 0.8);
+    text(card[0], x + 14, 252, 10, "F2", "#1B5776");
+    text(card[1], x + 14, 225, 22, "F2", "#0D2B42");
+  });
+
+  text("Validation", 80, 174, 12, "F2", "#0D2B42");
+  text(`Date de validation : ${certificate.completedDate}`, 80, 153, 10, "F1", "#494949");
+  text(`Seuil requis : 80% - QCM validé et 7 modules lus`, 80, 137, 10, "F1", "#494949");
+  text(`Source : ${certificate.sourceDocument}, validée le ${certificate.sourceDate}`, 80, 121, 10, "F1", "#494949");
+
+  text("Modules couverts", 520, 174, 12, "F2", "#0D2B42");
+  certificate.modules.forEach((moduleTitle, index) => {
+    const y = 153 - index * 15;
+    text(`- ${moduleTitle}`, 520, y, 8.5, "F1", "#494949");
+  });
+
+  rect(80, 38, 682, 18, "#0D2B42");
+  text("Document interne Ai For Alpha - preuve de formation LCB-FT générée automatiquement", 190, 44, 9, "F2", "#FFFFFF");
+
+  return lines.join("\n");
+}
+
+function wrapPdfText(value, maxChars) {
+  const words = String(value).split(/\s+/);
+  const lines = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (candidate.length > maxChars && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function pdfRgb(hex) {
+  const normalized = hex.replace("#", "");
+  const r = parseInt(normalized.slice(0, 2), 16) / 255;
+  const g = parseInt(normalized.slice(2, 4), 16) / 255;
+  const b = parseInt(normalized.slice(4, 6), 16) / 255;
+  return `${pdfNumber(r)} ${pdfNumber(g)} ${pdfNumber(b)}`;
+}
+
+function pdfNumber(value) {
+  return Number(value).toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function pdfEscapeText(value) {
+  const normalized = String(value)
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u2026/g, "...")
+    .replace(/\u00A0/g, " ")
+    .replace(/\u2022/g, "-")
+    .replace(/œ/g, "oe")
+    .replace(/Œ/g, "OE");
+
+  let escaped = "";
+  for (const char of normalized) {
+    const code = char.charCodeAt(0);
+    if (char === "(" || char === ")" || char === "\\") {
+      escaped += `\\${char}`;
+    } else if (code < 32 || code > 126) {
+      const byte = code <= 255 ? code : 63;
+      escaped += `\\${byte.toString(8).padStart(3, "0")}`;
+    } else {
+      escaped += char;
+    }
+  }
+  return escaped;
 }
 
 async function apiPost(path, payload) {
