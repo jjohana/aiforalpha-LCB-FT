@@ -761,7 +761,7 @@ const moduleCourseNotes = {
 };
 
 const APP_STORAGE_VERSION = 5;
-const APP_BUILD = "2026-07-08-qcm-18-questions";
+const APP_BUILD = "2026-07-08-required-qcm-path";
 const STORAGE_PREFIX = "afa-lcbft-training";
 const LEGACY_STATE_PREFIXES = [
   "afa-lcbft-training-v3:",
@@ -1607,6 +1607,7 @@ function setRole(roleId) {
   state.quizIndex = 0;
   state.answers = [];
   state.completedAt = null;
+  state.stats.bestScore = 0;
   state.currentAttemptId = createSessionId();
   state.attemptStartedAt = new Date().toISOString();
   state.questionStartedAt = state.attemptStartedAt;
@@ -1626,6 +1627,7 @@ function applyAssignedRole() {
   state.quizIndex = 0;
   state.answers = [];
   state.completedAt = null;
+  state.stats.bestScore = 0;
   state.currentAttemptId = createSessionId();
   state.attemptStartedAt = new Date().toISOString();
   state.questionStartedAt = state.attemptStartedAt;
