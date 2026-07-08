@@ -50,7 +50,8 @@ function ensureDataFile() {
 
 function readData() {
   ensureDataFile();
-  const data = normalizeData(JSON.parse(fs.readFileSync(DATA_FILE, "utf8")));
+  const raw = fs.readFileSync(DATA_FILE, "utf8").replace(/^\uFEFF/, "");
+  const data = normalizeData(JSON.parse(raw));
   for (const user of users) {
     if (!data.users.some(item => item.email === user.email)) {
       data.users.push(createUserRecord(user));
