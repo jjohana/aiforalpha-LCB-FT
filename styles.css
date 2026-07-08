@@ -387,12 +387,12 @@ p {
 
 .role-band {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 
 .role-card {
-  min-height: 118px;
+  min-height: 72px;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -401,6 +401,10 @@ p {
   display: grid;
   gap: 8px;
   align-content: start;
+}
+
+.assigned-role {
+  align-content: center;
 }
 
 .role-card.is-active {

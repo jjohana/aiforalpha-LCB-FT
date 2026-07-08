@@ -761,7 +761,7 @@ const moduleCourseNotes = {
 };
 
 const APP_STORAGE_VERSION = 5;
-const APP_BUILD = "2026-07-07-restore-progress";
+const APP_BUILD = "2026-07-08-qcm-18-questions";
 const STORAGE_PREFIX = "afa-lcbft-training";
 const LEGACY_STATE_PREFIXES = [
   "afa-lcbft-training-v3:",
@@ -772,6 +772,7 @@ const MAX_LOCAL_EVENTS = 500;
 const MAX_LOCAL_ATTEMPTS = 200;
 const MAX_TRACKED_DELTA_MS = 5 * 60 * 1000;
 const MAX_QUESTION_TIME_MS = 30 * 60 * 1000;
+const QUIZ_TARGET_QUESTIONS = 18;
 
 const stateDefaults = {
   schemaVersion: APP_STORAGE_VERSION,
@@ -973,7 +974,7 @@ async function login(rawEmail) {
   sessionStorage.setItem("afa-lcbft-session", JSON.stringify(currentUser));
   loadState();
   hydrateStateFromServer(serverUser);
-  if (!state.role || state.role === "all") state.role = user.defaultRole || "all";
+  applyAssignedRole();
   ensureQuizOrder();
   ensureQuestionTimer();
   saveState("login");
@@ -990,6 +991,7 @@ function restoreSession() {
     if (!user) return false;
     currentUser = { ...user, sessionId: parsed.sessionId, serverMode: parsed.serverMode };
     loadState();
+    applyAssignedRole();
     ensureQuizOrder();
     ensureQuestionTimer();
     saveState("session_restored", { remote: false });
@@ -1614,8 +1616,24 @@ function setRole(roleId) {
   showToast("Parcours mis à jour.");
 }
 
+function applyAssignedRole() {
+  const assignedRole = resolveRole(currentUser?.defaultRole || state.role);
+  if (state.role === assignedRole) return;
+
+  state.role = assignedRole;
+  state.quizOrder = [];
+  state.choiceOrders = {};
+  state.quizIndex = 0;
+  state.answers = [];
+  state.completedAt = null;
+  state.currentAttemptId = createSessionId();
+  state.attemptStartedAt = new Date().toISOString();
+  state.questionStartedAt = state.attemptStartedAt;
+}
+
 function ensureQuizOrder() {
   const validIds = getQuestionsForRole().map((question, index) => index);
+  const targetLength = getQuizTargetLength();
   if (state.quizOrder.length === 0 || state.quizOrder.some(index => !validIds.includes(index))) {
     state.quizOrder = buildQuizOrder();
     state.choiceOrders = {};
@@ -1625,6 +1643,12 @@ function ensureQuizOrder() {
     state.currentAttemptId = state.currentAttemptId || createSessionId();
     state.attemptStartedAt = state.attemptStartedAt || new Date().toISOString();
     state.questionStartedAt = state.questionStartedAt || state.attemptStartedAt;
+  } else if (state.quizOrder.length < targetLength) {
+    const answeredCount = state.answers.filter(Boolean).length;
+    state.quizOrder = extendQuizOrder(state.quizOrder, targetLength);
+    state.completedAt = null;
+    state.quizIndex = getRestoredQuizIndex(answeredCount, state.quizOrder.length, null);
+    state.questionStartedAt = state.questionStartedAt || new Date().toISOString();
   }
   ensureChoiceOrders();
 }
@@ -1650,11 +1674,33 @@ function buildQuizOrder() {
   }
 
   const unique = Array.from(new Set(selected));
-  const target = state.role === "compliance" || state.role === "client" ? 18 : 14;
+  const target = getQuizTargetLength();
   for (let index = 0; index < questions.length && unique.length < target; index += 1) {
     if (!unique.includes(index)) unique.push(index);
   }
   return unique.slice(0, target);
+}
+
+function getQuizTargetLength() {
+  return Math.min(QUIZ_TARGET_QUESTIONS, getQuestionsForRole().length);
+}
+
+function extendQuizOrder(existingOrder, targetLength) {
+  const questions = getQuestionsForRole();
+  const validIds = new Set(questions.map((question, index) => index));
+  const order = Array.from(new Set(existingOrder.filter(index => validIds.has(index))));
+  const preferred = buildQuizOrder();
+
+  for (const questionIndex of preferred) {
+    if (order.length >= targetLength) break;
+    if (!order.includes(questionIndex)) order.push(questionIndex);
+  }
+
+  for (let index = 0; index < questions.length && order.length < targetLength; index += 1) {
+    if (!order.includes(index)) order.push(index);
+  }
+
+  return order.slice(0, targetLength);
 }
 
 function ensureChoiceOrders() {
@@ -1729,7 +1775,12 @@ function hashString(value) {
 }
 
 function getQuestionsForRole() {
-  return questionBank.filter(question => question.roles.includes(state.role) || question.roles.includes("all"));
+  const primary = questionBank.filter(question => question.roles.includes(state.role) || question.roles.includes("all"));
+  if (primary.length >= QUIZ_TARGET_QUESTIONS) return primary;
+
+  const seen = new Set(primary.map(question => question.id));
+  const fallback = questionBank.filter(question => !seen.has(question.id));
+  return [...primary, ...fallback];
 }
 
 function getCurrentQuestion() {
@@ -1755,15 +1806,13 @@ function renderSession() {
 }
 
 function renderRoleBand() {
-  els.roleBand.innerHTML = roles.map(role => {
-    const active = role.id === state.role ? " is-active" : "";
-    return `
-      <button class="role-card${active}" type="button" data-role="${role.id}">
-        <strong>${escapeHtml(role.short)}</strong>
-        <span>${escapeHtml(role.detail)}</span>
-      </button>
-    `;
-  }).join("");
+  const role = roles.find(item => item.id === state.role) || roles.find(item => item.id === currentUser.defaultRole) || roles[0];
+  els.roleBand.innerHTML = `
+    <section class="role-card is-active assigned-role">
+      <strong>Parcours obligatoire : ${escapeHtml(role.short)}</strong>
+      <span>${escapeHtml(role.label)} · 18 questions · 7 blocs couverts · seuil 80%</span>
+    </section>
+  `;
 }
 
 function renderModuleNav() {
@@ -1934,8 +1983,9 @@ function buildCourseCorrection(question, answerRecord) {
   const notes = moduleCourseNotes[question.module] || moduleCourseNotes.model;
   const selectedLetter = getDisplayLetter(question, answerRecord.answer);
   const correctLetter = getDisplayLetter(question, question.answer);
-  const status = answerRecord.correct ? "Réponse correcte" : "Réponse à corriger";
-  const statusClass = answerRecord.correct ? "is-ok" : "is-ko";
+  const answerIsCorrect = isAnswerCorrect(answerRecord);
+  const status = answerIsCorrect ? "Réponse correcte" : "Réponse à corriger";
+  const statusClass = answerIsCorrect ? "is-ok" : "is-ko";
 
   return `
     <div class="course-correction">
@@ -2141,7 +2191,7 @@ function renderMetrics() {
 
 function getPassStatus() {
   const answered = state.answers.filter(Boolean);
-  const correct = answered.filter(item => item.correct).length;
+  const correct = answered.filter(isAnswerCorrect).length;
   const score = answered.length ? Math.round((correct / answered.length) * 100) : 0;
   const quizComplete = answered.length === state.quizOrder.length && state.quizOrder.length > 0;
   const qcmPassed = quizComplete && score >= 80;
@@ -2157,6 +2207,16 @@ function getPassStatus() {
     answered: answered.length,
     correct
   };
+}
+
+function isAnswerCorrect(answerRecord) {
+  if (!answerRecord) return false;
+  const question = questionBank.find(item => item.id === answerRecord.questionId);
+  if (question && Number.isInteger(answerRecord.answer)) return answerRecord.answer === question.answer;
+  if (Number.isInteger(answerRecord.answer) && Number.isInteger(answerRecord.correctAnswer)) {
+    return answerRecord.answer === answerRecord.correctAnswer;
+  }
+  return Boolean(answerRecord.correct);
 }
 
 function getCompletionMessage() {
