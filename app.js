@@ -849,7 +849,6 @@ const els = {
   adminRows: document.getElementById("adminRows"),
   refreshAdminBtn: document.getElementById("refreshAdminBtn"),
   exportBtn: document.getElementById("exportBtn"),
-  printBtn: document.getElementById("printBtn"),
   logoutBtn: document.getElementById("logoutBtn"),
   toast: document.getElementById("toast")
 };
@@ -924,7 +923,6 @@ function bindEvents() {
 
   els.refreshAdminBtn.addEventListener("click", refreshAdmin);
   els.exportBtn.addEventListener("click", exportCertificatePdf);
-  els.printBtn.addEventListener("click", () => window.print());
   els.logoutBtn.addEventListener("click", logout);
 }
 
