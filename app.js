@@ -2387,6 +2387,10 @@ async function refreshAdmin() {
     return;
   }
   els.adminPanel.classList.remove("is-hidden");
+  if (!currentUser.serverMode) {
+    renderAdminRows(buildLocalAdminFallback());
+    return;
+  }
   try {
     const data = currentUser.remoteLabel === "supabase"
       ? await dbGetAdminRecords()
