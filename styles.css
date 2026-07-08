@@ -213,6 +213,23 @@ p {
   margin-bottom: 4px;
 }
 
+.storage-status {
+  display: block;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--aifa-gold);
+  font-weight: 800;
+}
+
+.storage-status.is-online {
+  color: #9fe4d0;
+}
+
+.storage-status.is-offline {
+  color: var(--aifa-gold);
+}
+
 .nav-title {
   margin: 0 0 8px;
   color: #c9d7df;

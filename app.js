@@ -761,7 +761,8 @@ const moduleCourseNotes = {
 };
 
 const APP_STORAGE_VERSION = 5;
-const APP_BUILD = "2026-07-08-pdf-fallback";
+const APP_BUILD = "2026-07-08-db";
+const DB_CONFIG = window.AFA_DB || {};
 const STORAGE_PREFIX = "afa-lcbft-training";
 const LEGACY_STATE_PREFIXES = [
   "afa-lcbft-training-v3:",
@@ -816,6 +817,7 @@ const els = {
   loginEmail: document.getElementById("loginEmail"),
   loginMessage: document.getElementById("loginMessage"),
   allowedList: document.getElementById("allowedList"),
+  storageStatus: document.getElementById("storageStatus"),
   currentUserLabel: document.getElementById("currentUserLabel"),
   currentRoleLabel: document.getElementById("currentRoleLabel"),
   roleBand: document.getElementById("roleBand"),
@@ -857,6 +859,7 @@ const els = {
 
 function init() {
   renderAllowedUsers();
+  renderStorageStatus();
   bindEvents();
   bindPersistenceEvents();
   const restored = restoreSession();
@@ -951,6 +954,28 @@ function renderAllowedUsers() {
   els.allowedList.innerHTML = allowedUsers.map(user => `<span>${escapeHtml(user.email)}</span>`).join("");
 }
 
+function isSupabaseConfigured() {
+  return DB_CONFIG.provider === "supabase"
+    && typeof DB_CONFIG.supabaseUrl === "string"
+    && DB_CONFIG.supabaseUrl.startsWith("https://")
+    && typeof DB_CONFIG.supabaseAnonKey === "string"
+    && DB_CONFIG.supabaseAnonKey.length > 20;
+}
+
+function canUseLocalApi() {
+  return ["localhost", "127.0.0.1", ""].includes(window.location.hostname);
+}
+
+function renderStorageStatus() {
+  if (!els.storageStatus) return;
+  const online = isSupabaseConfigured();
+  els.storageStatus.textContent = online
+    ? "Base distante : active"
+    : "Base distante : non configurÃ©e";
+  els.storageStatus.classList.toggle("is-online", online);
+  els.storageStatus.classList.toggle("is-offline", !online);
+}
+
 async function login(rawEmail) {
   const email = String(rawEmail || "").trim().toLowerCase();
   const user = allowedUsers.find(item => item.email === email);
@@ -963,17 +988,24 @@ async function login(rawEmail) {
   let sessionId = createSessionId();
   let serverMode = false;
   let serverUser = null;
+  let remoteLabel = "local";
 
   try {
-    const result = await apiPost("/api/login", { email });
+    const result = isSupabaseConfigured()
+      ? await dbLogin(email, sessionId)
+      : canUseLocalApi()
+        ? await apiPost("/api/login", { email })
+        : null;
+    if (!result) throw new Error("remote_disabled");
     sessionId = result.sessionId || sessionId;
     serverUser = result.user || null;
     serverMode = true;
+    remoteLabel = isSupabaseConfigured() ? "supabase" : "server";
   } catch {
     serverMode = false;
   }
 
-  currentUser = { ...user, sessionId, serverMode };
+  currentUser = { ...user, sessionId, serverMode, remoteLabel };
   sessionStorage.setItem("afa-lcbft-session", JSON.stringify(currentUser));
   loadState();
   hydrateStateFromServer(serverUser);
@@ -982,7 +1014,13 @@ async function login(rawEmail) {
   ensureQuestionTimer();
   saveState("login");
   showApp();
-  showToast(serverMode ? "Connexion enregistrée." : "Connexion locale : serveur de suivi indisponible.");
+  if (serverMode && remoteLabel === "supabase") {
+    showToast("Connexion enregistrée en base distante.");
+  } else if (serverMode) {
+    showToast("Connexion enregistrée sur serveur local.");
+  } else {
+    showToast("Base distante non configurée : suivi central inactif.");
+  }
 }
 
 function restoreSession() {
@@ -992,7 +1030,12 @@ function restoreSession() {
     const parsed = JSON.parse(raw);
     const user = allowedUsers.find(item => item.email === parsed.email);
     if (!user) return false;
-    currentUser = { ...user, sessionId: parsed.sessionId, serverMode: parsed.serverMode };
+    currentUser = {
+      ...user,
+      sessionId: parsed.sessionId,
+      serverMode: parsed.serverMode,
+      remoteLabel: parsed.remoteLabel || (isSupabaseConfigured() ? "supabase" : "server")
+    };
     loadState();
     applyAssignedRole();
     ensureQuizOrder();
@@ -1007,8 +1050,9 @@ function restoreSession() {
 async function hydrateRestoredSessionFromServer() {
   if (!currentUser?.serverMode || !currentUser.sessionId) return;
   try {
-    const params = new URLSearchParams({ email: currentUser.email, sessionId: currentUser.sessionId });
-    const data = await apiGet(`/api/user?${params.toString()}`);
+    const data = currentUser.remoteLabel === "supabase"
+      ? await dbGetUser(currentUser.email)
+      : await apiGet(`/api/user?${new URLSearchParams({ email: currentUser.email, sessionId: currentUser.sessionId }).toString()}`);
     if (!data?.user) return;
     hydrateStateFromServer(data.user);
     applyAssignedRole();
@@ -1574,7 +1618,9 @@ function updateTrackedTime(reason) {
 function flushProgress(reason) {
   if (!currentUser) return;
   saveState(reason, { remote: false });
-  if (currentUser.serverMode && navigator.sendBeacon) {
+  if (currentUser.serverMode && currentUser.remoteLabel === "supabase") {
+    dbSaveProgress(buildProofPayload(reason), { keepalive: true }).catch(() => {});
+  } else if (currentUser.serverMode && navigator.sendBeacon) {
     const blob = new Blob([JSON.stringify(buildProofPayload(reason))], { type: "application/json" });
     navigator.sendBeacon("/api/progress", blob);
   }
@@ -2268,7 +2314,11 @@ async function syncProgress(reason) {
   if (!currentUser) return;
   const payload = buildProofPayload(reason);
   try {
-    await apiPost("/api/progress", payload);
+    if (currentUser.remoteLabel === "supabase") {
+      await dbSaveProgress(payload);
+    } else {
+      await apiPost("/api/progress", payload);
+    }
     if (currentUser.isAdmin) refreshAdmin();
   } catch {
     // The prototype still works offline; the exported proof remains available.
@@ -2338,12 +2388,79 @@ async function refreshAdmin() {
   }
   els.adminPanel.classList.remove("is-hidden");
   try {
-    const params = new URLSearchParams({ email: currentUser.email, sessionId: currentUser.sessionId });
-    const data = await apiGet(`/api/admin/records?${params.toString()}`);
+    const data = currentUser.remoteLabel === "supabase"
+      ? await dbGetAdminRecords()
+      : await apiGet(`/api/admin/records?${new URLSearchParams({ email: currentUser.email, sessionId: currentUser.sessionId }).toString()}`);
     renderAdminRows(data.users || []);
   } catch {
     renderAdminRows(buildLocalAdminFallback());
   }
+}
+
+function normalizeAdminResult(result = {}) {
+  const totalModules = safeNumber(result.totalModules) || modules.length;
+  const modulesRead = safeNumber(result.modulesRead);
+  const answered = safeNumber(result.answered);
+  const correct = safeNumber(result.correct);
+  const score = safeNumber(result.score);
+  const passed = Boolean(result.trainingPassed || result.passed || result.qcmPassed);
+  const trainingPassed = Boolean(result.trainingPassed || (passed && modulesRead >= totalModules));
+  return {
+    score,
+    correct,
+    answered,
+    modulesRead,
+    totalModules,
+    timeSpentMs: safeNumber(result.timeSpentMs || result.attemptTimeMs),
+    completedAt: result.completedAt || result.savedAt || null,
+    passed,
+    trainingPassed
+  };
+}
+
+function attemptToAdminResult(attempt = {}) {
+  return normalizeAdminResult({
+    score: attempt.score,
+    correct: attempt.correct,
+    answered: attempt.answered,
+    modulesRead: attempt.modulesRead,
+    totalModules: attempt.totalModules,
+    timeSpentMs: attempt.timeSpentMs || attempt.attemptTimeMs,
+    completedAt: attempt.completedAt || attempt.savedAt,
+    passed: attempt.passed,
+    trainingPassed: attempt.trainingPassed
+  });
+}
+
+function compareAdminResults(first, second) {
+  const fields = [
+    [first.trainingPassed ? 1 : 0, second.trainingPassed ? 1 : 0],
+    [first.passed ? 1 : 0, second.passed ? 1 : 0],
+    [first.score, second.score],
+    [first.correct, second.correct],
+    [first.answered, second.answered],
+    [first.modulesRead, second.modulesRead],
+    [dateMs(first.completedAt), dateMs(second.completedAt)]
+  ];
+  for (const [left, right] of fields) {
+    if (left > right) return 1;
+    if (left < right) return -1;
+  }
+  return 0;
+}
+
+function getAdminDisplayResult(user) {
+  const candidates = [];
+  if (user.latestProgress?.result) candidates.push(normalizeAdminResult(user.latestProgress.result));
+  for (const attempt of Array.isArray(user.attempts) ? user.attempts : []) {
+    candidates.push(attemptToAdminResult(attempt));
+  }
+  for (const attempt of Array.isArray(user.longRecord?.attempts) ? user.longRecord.attempts : []) {
+    candidates.push(attemptToAdminResult(attempt));
+  }
+  if (user.longRecord?.latestSnapshot) candidates.push(normalizeAdminResult(user.longRecord.latestSnapshot));
+  if (!candidates.length) return normalizeAdminResult({});
+  return candidates.sort((a, b) => compareAdminResults(b, a))[0];
 }
 
 function renderAdminRows(users) {
@@ -2353,12 +2470,12 @@ function renderAdminRows(users) {
   }
 
   els.adminRows.innerHTML = users.map(user => {
-    const latest = user.latestProgress?.result || {};
+    const latest = getAdminDisplayResult(user);
     const score = Number.isFinite(latest.score) ? `${latest.score}%` : "-";
     const correct = Number.isFinite(latest.correct) && Number.isFinite(latest.answered) ? `${latest.correct}/${latest.answered}` : "-";
     const timeSpent = formatDuration(latest.timeSpentMs || user.totalTimeMs || user.longRecord?.totalTimeMs || 0);
     const modulesText = `${latest.modulesRead || 0}/${latest.totalModules || modules.length}`;
-    const status = latest.passed ? "Validé" : "En cours";
+    const status = latest.trainingPassed ? "Validé" : "En cours";
     const lastLogin = user.lastLoginAt ? formatDateTime(user.lastLoginAt) : "-";
     return `
       <tr>
@@ -2369,7 +2486,7 @@ function renderAdminRows(users) {
         <td>${correct}</td>
         <td>${timeSpent}</td>
         <td>${modulesText}</td>
-        <td><span class="status-chip${latest.passed ? " is-ok" : ""}">${status}</span></td>
+        <td><span class="status-chip${latest.trainingPassed ? " is-ok" : ""}">${status}</span></td>
       </tr>
     `;
   }).join("");
@@ -2632,6 +2749,294 @@ function pdfEscapeText(value) {
     }
   }
   return escaped;
+}
+
+function dbBaseUrl(path) {
+  const base = DB_CONFIG.supabaseUrl.replace(/\/+$/, "");
+  return `${base}/rest/v1/${path}`;
+}
+
+function dbHeaders(prefer = "return=representation") {
+  return {
+    apikey: DB_CONFIG.supabaseAnonKey,
+    Authorization: `Bearer ${DB_CONFIG.supabaseAnonKey}`,
+    "Content-Type": "application/json",
+    Prefer: prefer
+  };
+}
+
+async function dbRequest(path, options = {}) {
+  if (!isSupabaseConfigured()) throw new Error("supabase_not_configured");
+  const headers = {
+    ...dbHeaders(options.prefer),
+    ...(options.headers || {})
+  };
+  if (!options.prefer) delete headers.Prefer;
+  const response = await fetch(dbBaseUrl(path), {
+    ...options,
+    headers
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(`Supabase ${response.status} ${detail}`);
+  }
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
+async function dbSelect(path, options = {}) {
+  return dbRequest(path, {
+    method: "GET",
+    keepalive: Boolean(options.keepalive),
+    prefer: ""
+  });
+}
+
+async function dbUpsert(path, rows, options = {}) {
+  return dbRequest(path, {
+    method: "POST",
+    body: JSON.stringify(rows),
+    keepalive: Boolean(options.keepalive),
+    prefer: options.prefer || "resolution=merge-duplicates,return=representation"
+  });
+}
+
+function dbEmailFilter(email) {
+  return `email=eq.${encodeURIComponent(String(email || "").toLowerCase())}`;
+}
+
+function progressQualityForDb(progress) {
+  const result = progress?.result || {};
+  return {
+    completedAtMs: dateMs(result.completedAt),
+    trainingPassed: Boolean(result.trainingPassed || result.passed),
+    qcmPassed: Boolean(result.qcmPassed || result.passed),
+    modulesComplete: Boolean(result.modulesComplete || safeNumber(result.modulesRead) >= safeNumber(result.totalModules || modules.length)),
+    score: safeNumber(result.score),
+    correct: safeNumber(result.correct),
+    answered: safeNumber(result.answered),
+    modulesRead: safeNumber(result.modulesRead)
+  };
+}
+
+function shouldReplaceCloudProgress(existingProgress, incomingProgress) {
+  if (!existingProgress) return true;
+  const existing = progressQualityForDb(existingProgress);
+  const incoming = progressQualityForDb(incomingProgress);
+
+  if (incoming.trainingPassed && !existing.trainingPassed) return true;
+  if (existing.trainingPassed && !incoming.trainingPassed && incoming.answered <= existing.answered && incoming.modulesRead <= existing.modulesRead) return false;
+  if (incoming.completedAtMs > existing.completedAtMs + 1000) return true;
+  if (existing.completedAtMs > incoming.completedAtMs + 1000 && existing.trainingPassed && existing.correct >= incoming.correct) return false;
+  if (incoming.answered === 0 && existing.answered > 0) return false;
+  if (incoming.answered > existing.answered) return true;
+  if (incoming.modulesRead > existing.modulesRead && incoming.answered >= existing.answered) return true;
+  if (incoming.answered >= existing.answered && incoming.modulesRead >= existing.modulesRead && incoming.correct > existing.correct) return true;
+  if (existing.answered >= incoming.answered && existing.modulesRead >= incoming.modulesRead && existing.correct > incoming.correct) return false;
+  return incoming.score >= existing.score;
+}
+
+async function dbLogin(email, sessionId = createSessionId()) {
+  const allowed = allowedUsers.find(user => user.email === email);
+  if (!allowed) throw new Error("unauthorized");
+  const now = new Date().toISOString();
+
+  await dbUpsert("training_users?on_conflict=email", [{
+    email: allowed.email,
+    name: allowed.name,
+    default_role: allowed.defaultRole,
+    is_admin: allowed.isAdmin,
+    updated_at: now
+  }], { prefer: "resolution=merge-duplicates,return=minimal" });
+
+  const existingRows = await dbSelect(`training_progress?${dbEmailFilter(email)}&select=*`);
+  const existing = existingRows?.[0] || null;
+  const progressRow = {
+    email: allowed.email,
+    name: allowed.name,
+    default_role: allowed.defaultRole,
+    is_admin: allowed.isAdmin,
+    login_count: safeNumber(existing?.login_count) + 1,
+    last_login_at: now,
+    total_time_ms: safeNumber(existing?.total_time_ms),
+    module_time_ms: existing?.module_time_ms || {},
+    latest_progress: existing?.latest_progress || null,
+    updated_at: now
+  };
+  await dbUpsert("training_progress?on_conflict=email", [progressRow], { prefer: "resolution=merge-duplicates,return=minimal" });
+
+  await dbUpsert("training_sessions?on_conflict=session_id", [{
+    session_id: sessionId,
+    email: allowed.email,
+    created_at: now,
+    last_seen_at: now,
+    user_agent: navigator.userAgent || null
+  }], { prefer: "resolution=merge-duplicates,return=minimal" });
+
+  await dbInsertEvent(email, sessionId, "login", "login", { loginCount: progressRow.login_count });
+  return { sessionId, user: await dbBuildUser(email) };
+}
+
+async function dbGetUser(email) {
+  return { user: await dbBuildUser(email) };
+}
+
+async function dbBuildUser(email) {
+  const allowed = allowedUsers.find(user => user.email === email);
+  const progressRows = await dbSelect(`training_progress?${dbEmailFilter(email)}&select=*`);
+  const progress = progressRows?.[0] || null;
+  const attempts = await dbSelect(`training_attempts?${dbEmailFilter(email)}&select=*&order=completed_at.desc.nullslast&limit=200`);
+  return {
+    email,
+    name: progress?.name || allowed?.name || email,
+    defaultRole: progress?.default_role || allowed?.defaultRole || "all",
+    isAdmin: Boolean(progress?.is_admin ?? allowed?.isAdmin),
+    loginCount: safeNumber(progress?.login_count),
+    lastLoginAt: progress?.last_login_at || null,
+    totalTimeMs: safeNumber(progress?.total_time_ms),
+    moduleTimeMs: progress?.module_time_ms || {},
+    latestProgress: progress?.latest_progress || null,
+    attempts: (attempts || []).map(dbAttemptToAppAttempt)
+  };
+}
+
+async function dbSaveProgress(payload, options = {}) {
+  if (!payload?.learner?.email) return;
+  const email = payload.learner.email;
+  const now = new Date().toISOString();
+  const rows = await dbSelect(`training_progress?${dbEmailFilter(email)}&select=*`, options).catch(() => []);
+  const existing = rows?.[0] || null;
+  const incomingProgress = {
+    savedAt: now,
+    reason: payload.reason || null,
+    role: payload.learner?.role || null,
+    roleLabel: payload.learner?.roleLabel || null,
+    result: payload.result || null,
+    storage: payload.storage || null,
+    longRecord: payload.longRecord || null,
+    readModules: payload.readModules || [],
+    answers: payload.answers || []
+  };
+  const latestProgress = shouldReplaceCloudProgress(existing?.latest_progress, incomingProgress)
+    ? incomingProgress
+    : existing?.latest_progress || incomingProgress;
+
+  await dbUpsert("training_progress?on_conflict=email", [{
+    email,
+    name: payload.learner?.name || currentUser?.name || email,
+    default_role: currentUser?.defaultRole || payload.learner?.role || "all",
+    is_admin: Boolean(currentUser?.isAdmin),
+    login_count: safeNumber(existing?.login_count),
+    last_login_at: existing?.last_login_at || longRecord?.lastLoginAt || now,
+    total_time_ms: Math.max(
+      safeNumber(existing?.total_time_ms),
+      safeNumber(payload.result?.timeSpentMs),
+      safeNumber(payload.longRecord?.totalTimeMs)
+    ),
+    module_time_ms: mergeModuleTimes(existing?.module_time_ms, payload.result?.moduleTimeMs, payload.longRecord?.moduleTimeMs),
+    latest_progress: latestProgress,
+    updated_at: now
+  }], { keepalive: options.keepalive, prefer: "resolution=merge-duplicates,return=minimal" });
+
+  if (payload.result?.completedAt && safeNumber(payload.result?.answered) > 0) {
+    const attemptId = payload.longRecord?.latestSnapshot?.attemptId
+      || payload.answers?.[0]?.attemptId
+      || `${email}:${payload.result.completedAt}`;
+    await dbUpsert("training_attempts?on_conflict=attempt_id", [buildDbAttemptRow(attemptId, payload, now)], {
+      keepalive: options.keepalive,
+      prefer: "resolution=merge-duplicates,return=minimal"
+    });
+  }
+
+  await dbInsertEvent(email, payload.learner?.sessionId, "progress", payload.reason, {
+    score: payload.result?.score ?? null,
+    correct: payload.result?.correct ?? null,
+    answered: payload.result?.answered ?? null,
+    modulesRead: payload.result?.modulesRead ?? null,
+    passed: payload.result?.passed ?? null
+  }, options);
+}
+
+function buildDbAttemptRow(attemptId, payload, savedAt) {
+  const result = payload.result || {};
+  return {
+    attempt_id: attemptId,
+    email: payload.learner.email,
+    completed_at: result.completedAt,
+    saved_at: savedAt,
+    role: payload.learner?.role || null,
+    role_label: payload.learner?.roleLabel || null,
+    score: safeNumber(result.score),
+    correct_count: safeNumber(result.correct),
+    answered_count: safeNumber(result.answered),
+    total_questions: safeNumber(result.totalQuestions),
+    modules_read: safeNumber(result.modulesRead),
+    total_modules: safeNumber(result.totalModules) || modules.length,
+    passed: Boolean(result.passed),
+    training_passed: Boolean(result.trainingPassed),
+    time_spent_ms: safeNumber(result.timeSpentMs),
+    payload
+  };
+}
+
+function dbAttemptToAppAttempt(row) {
+  const payload = row?.payload || {};
+  return {
+    attemptId: row.attempt_id,
+    completedAt: row.completed_at,
+    savedAt: row.saved_at,
+    role: row.role,
+    roleLabel: row.role_label,
+    score: safeNumber(row.score),
+    correct: safeNumber(row.correct_count),
+    answered: safeNumber(row.answered_count),
+    totalQuestions: safeNumber(row.total_questions),
+    modulesRead: safeNumber(row.modules_read),
+    totalModules: safeNumber(row.total_modules) || modules.length,
+    passed: Boolean(row.passed),
+    trainingPassed: Boolean(row.training_passed),
+    timeSpentMs: safeNumber(row.time_spent_ms),
+    answers: payload.answers || []
+  };
+}
+
+async function dbInsertEvent(email, sessionId, eventType, reason, payload = {}, options = {}) {
+  return dbUpsert("training_events", [{
+    email,
+    session_id: sessionId || null,
+    event_type: eventType,
+    reason: reason || null,
+    payload
+  }], { keepalive: options.keepalive, prefer: "return=minimal" }).catch(() => null);
+}
+
+async function dbGetAdminRecords() {
+  const progressRows = await dbSelect("training_progress?select=*&order=email.asc");
+  const attemptRows = await dbSelect("training_attempts?select=*&order=completed_at.desc.nullslast&limit=1000");
+  const attemptsByEmail = new Map();
+  for (const row of attemptRows || []) {
+    const list = attemptsByEmail.get(row.email) || [];
+    list.push(dbAttemptToAppAttempt(row));
+    attemptsByEmail.set(row.email, list);
+  }
+  const progressByEmail = new Map((progressRows || []).map(row => [row.email, row]));
+  const users = allowedUsers.map(user => {
+    const progress = progressByEmail.get(user.email);
+    return {
+      email: user.email,
+      name: progress?.name || user.name,
+      defaultRole: progress?.default_role || user.defaultRole,
+      isAdmin: Boolean(progress?.is_admin ?? user.isAdmin),
+      loginCount: safeNumber(progress?.login_count),
+      lastLoginAt: progress?.last_login_at || null,
+      totalTimeMs: safeNumber(progress?.total_time_ms),
+      moduleTimeMs: progress?.module_time_ms || {},
+      latestProgress: progress?.latest_progress || null,
+      attempts: attemptsByEmail.get(user.email) || []
+    };
+  });
+  return { users };
 }
 
 async function apiPost(path, payload) {
