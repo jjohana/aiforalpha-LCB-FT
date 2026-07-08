@@ -807,6 +807,7 @@ let currentUser = null;
 let state = createDefaultState("all");
 let longRecord = null;
 let syncTimer = null;
+let certificatePdfUrl = null;
 
 const els = {
   loginScreen: document.getElementById("loginScreen"),
@@ -845,6 +846,7 @@ const els = {
   metricStatus: document.getElementById("metricStatus"),
   certificate: document.getElementById("certificate"),
   certificateText: document.getElementById("certificateText"),
+  certificatePdfFallback: document.getElementById("certificatePdfFallback"),
   adminPanel: document.getElementById("adminPanel"),
   adminRows: document.getElementById("adminRows"),
   refreshAdminBtn: document.getElementById("refreshAdminBtn"),
@@ -1030,6 +1032,7 @@ function showApp() {
 function logout() {
   flushProgress("logout");
   sessionStorage.removeItem("afa-lcbft-session");
+  clearCertificatePdfFallback();
   currentUser = null;
   state = createDefaultState("all");
   longRecord = null;
@@ -2215,6 +2218,7 @@ function renderMetrics() {
     els.certificate.classList.add("is-visible");
   } else {
     els.certificate.classList.remove("is-visible");
+    clearCertificatePdfFallback();
   }
 }
 
@@ -2403,16 +2407,36 @@ function exportCertificatePdf() {
 
   const certificate = buildCertificateData(pass);
   const blob = createCertificatePdfBlob(certificate);
-  const url = URL.createObjectURL(blob);
+  if (certificatePdfUrl) URL.revokeObjectURL(certificatePdfUrl);
+  certificatePdfUrl = URL.createObjectURL(blob);
   const link = document.createElement("a");
   const safeName = currentUser.email.split("@")[0].replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-  link.href = url;
-  link.download = `attestation-lcbft-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = `attestation-lcbft-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
+  configureCertificatePdfFallback(certificatePdfUrl, filename);
+  link.href = certificatePdfUrl;
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-  showToast("Attestation PDF téléchargée.");
+  showToast("PDF généré. Si le téléchargement ne démarre pas, utilisez le lien affiché dans l'attestation.");
+}
+
+function configureCertificatePdfFallback(url, filename) {
+  if (!els.certificatePdfFallback) return;
+  els.certificatePdfFallback.href = url;
+  els.certificatePdfFallback.download = filename;
+  els.certificatePdfFallback.classList.remove("is-hidden");
+}
+
+function clearCertificatePdfFallback() {
+  if (certificatePdfUrl) {
+    URL.revokeObjectURL(certificatePdfUrl);
+    certificatePdfUrl = null;
+  }
+  if (!els.certificatePdfFallback) return;
+  els.certificatePdfFallback.href = "#";
+  els.certificatePdfFallback.removeAttribute("download");
+  els.certificatePdfFallback.classList.add("is-hidden");
 }
 
 function buildCertificateData(pass = getPassStatus()) {
